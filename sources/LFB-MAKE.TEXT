@@ -1,0 +1,29 @@
+$EXEC
+${==========================================================================}
+${ LFB-MAKE.TEXT -- build LisaFuji Browser: compile, link, put the Obj and ICON    }
+${ files in place as tool 419314, compile the phrase file.  THEN run       }
+${ LFB/INSTALL (R <LFB/INSTALL).  Same two-exec recipe as PZL-MAKE REV C.  }
+${                                                                          }
+${ 419314 IS PENCILLED IN: next after 419311 (LisaFileMover) in Tim's      }
+${ series, not yet reserved on the LisaList2 tool-number list.  The number }
+${ appears only in this file (three Filemgr names and the Alert output     }
+${ name) and in LFB/INSTALL.                                                }
+${                                                                          }
+${ LFB/ICON.BIN must be on the disk before this runs.                      }
+${==========================================================================}
+$SUBMIT LFB/COMP
+$SUBMIT LFB/LINK
+${                                                                          }
+F{ilemgr}D{elete}~{T419314~}Obj
+Y{es}D{elete}~{T419314~}PHRASE
+Y{es}D{elete}~{T419314~}ICON
+Y{es}C{opy}LFB/LFB.OBJ
+~{T419314~}Obj
+C{opy}LFB/ICON.BIN
+~{T419314~}ICON
+Q{uit}
+${                                                                          }
+R{un}Alert
+LFB/ALERTS.TEXT
+~{T419314~}
+$ENDEXEC

@@ -1,0 +1,2101 @@
+program LfBrowse;
+
+{ LFB-MAIN.TEXT -- LisaFuji Browser  ***  0.1 REV A  ***                 }
+{ REV A  14-Oct-2026  First build: a text web browser for the Lisa      }
+{                      Office System through a LisaWeb gateway and an   }
+{                      RS-232 FujiNet on Serial B.  NOT yet compiled on }
+{                      a Lisa.                                           }
+{                                                                        }
+{ THIS LINE IS THE VERSION CHECK.  If the About box disagrees with the  }
+{ number above, a stale file was sent.  (The authoritative constant is  }
+{ lfbVersion in LFB-GLOBALS.TEXT; keep the two in step.)                 }
+{                                                                        }
+{ Tool 419314.  Skeleton: LFJ-MAIN REV D (LisaFuji 0.4): the callbacks, }
+{ the pane, the typed prompt, the fetch loop, the event loop and        }
+{ Initialize are lifted from it unchanged (make_main.py does the        }
+{ lifting), so a fix there belongs here too.                             }
+{                                                                        }
+{ WHAT IT DOES                                                           }
+{   The Lisa never fetches a web page itself.  It sends the gateway a   }
+{   short request through the FujiNet (N1, like the news service):      }
+{     /w/home               the start page: a list of places to go      }
+{     /w/open?u=ADDRESS     a page by address                            }
+{     /w/page?d=DOC&p=N     page N of a document the gateway holds      }
+{     /w/link?d=DOC&n=N     follow link N of that document              }
+{     /w/find?q=WORDS       a search                                    }
+{     /w/links?d=DOC&p=N    the addresses of the links on page N        }
+{   and gets back: line 1 "D<doc> <page>/<pages>", line 2 the title,   }
+{   line 3 the site and the link count, then 14 lines of text wrapped   }
+{   to 76 columns with links marked [n]; or one line "ERROR: ...".      }
+{   Keys: H start page, G address, S search, SPACE/N next page, P       }
+{   previous, B back, R reload, L links, a link number + RETURN, or a   }
+{   click on the [n] in the text.  ? help, W wiring.                    }
+{ The port is opened for each request and closed after it, so LISACom   }
+{ can have Serial B back without quitting this tool.                     }
+
+uses (*$U UnitStd.obj *)   UnitStd,
+     (*$U UnitHz.obj *)    UnitHz,
+     (*$U Storage.obj *)   Storage,
+     (*$U QuickDraw.obj *) QuickDraw,
+     (*$U Fontmgr.obj *)   FontMgr,
+     (*$U SysCall.obj *)   SysCall,
+     (*$U wm.events.obj *) Events,
+     (*$U wm.folders.obj *) Folders,
+     (*$U wm.menus.obj *)  Menus,
+     (*$U AlertMgr.obj *)  AlertMgr,
+     (*$U WMLstd.obj *)    WMLstd,
+     (*$U WMlCrs.obj *)    WMLCrs,
+     (*$U FilerComm.obj *) FilerComm,
+     (*$U LFB/GLOBALS.OBJ *) LfbGlobals,
+     (*$U LFB/FNBUS.OBJ *)   FnBus;
+
+var
+   termErr : integer;
+
+{------------------------------------------------------------------------}
+{ The three required callbacks, the menus and the pane: LisaFuji's.      }
+{------------------------------------------------------------------------}
+
+function OutOfHeapSpace (hz : THz; bytesNeeded : integer) : integer;
+begin
+   OutOfHeapSpace := 0
+end;
+
+procedure AlertFailed;
+var err : integer;
+begin
+   if initing then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      Halt
+   end
+end;
+
+procedure LastWishes (environPtr : p_env_blk; excepDataPtr : p_ex_data);
+begin
+   ImDying;
+   Halt
+end;
+
+procedure PutUpMenus;
+var m : integer;
+begin
+   ClearMenuBar;
+   for m := mFile to lastBarMenu do
+      InsertMenu(myMenus[m], 0);
+   DrawMenuBar
+end;
+
+procedure Clip (var big : Str255; var out : StatStr);
+{ Copy at most 80 characters.  HARDWARE LESSON (INS REV B): COPY(big,   }
+{ 1, 80) with LENGTH(big) < 80 returned an EMPTY string on the Lisa.    }
+var n : integer;
+begin
+   n := length(big);
+   if n > 80 then n := 80;
+   if n = 0 then
+      out := ''
+   else
+      out := copy(big, 1, n)
+end;
+
+{------------------------------------------------------------------------}
+{ Pictures (REV K).  picBuf holds one row; PicRow draws it at row r.      }
+{------------------------------------------------------------------------}
+
+procedure PicRow (r : integer);
+{ Draw the row in picBuf as picture row r. }
+var src, dst : Rect;
+begin
+   if myWindow = nil then
+      exit(PicRow);
+   SetPort(myWindow);
+   SetRect(src, 0, 0, picW, 1);
+   SetRect(dst, picX, picTop + r, picX + picW, picTop + r + 1);
+   CopyBits(picBits, myWindow^.portBits, src, dst, srcCopy, nil)
+end;
+
+procedure PicRedraw;
+{ Draw the picture again from LFBPICT.DATA (an update event), 16 rows a read. }
+var path  : Pathname;
+    ref   : integer;
+    ec, se: integer;
+    got   : longint;
+    r, nb : integer;
+    i, j  : integer;
+    n     : integer;
+    go    : boolean;
+begin
+   nb := picW div 8;
+   path := concat(myVol, picFile);
+   Sched_Class(se, false);
+   OPEN(ec, path, ref, [DRead]);
+   if ec <= 0 then begin
+      r := 0;
+      go := true;
+      while go and (r < picRows) do begin
+         n := picRows - r;
+         if n > picBatN then n := picBatN;
+         got := 0;
+         READ_DATA(ec, ref, ord4(@picBat), n * nb, got, sequential, 0);
+         if got < n * nb then
+            go := false
+         else
+            for i := 0 to n - 1 do begin
+               for j := 0 to nb - 1 do
+                  picBuf.a[j] := picBat[i * nb + j];
+               PicRow(r);
+               r := r + 1
+            end
+      end;
+      CLOSE_OBJECT(ec, ref)
+   end;
+   Sched_Class(se, true)
+end;
+
+procedure DrawShow;
+{ Repaint the whole status pane. }
+var fi : FontInfo;
+    i  : integer;
+begin
+   if myWindow = nil then
+      exit(DrawShow);
+   SetPort(myWindow);
+   EraseRect(myWindow^.portRect);
+   GetFontInfo(fi);
+   for i := 1 to statCnt do begin
+      MoveTo(10, 6 + (i - 1) * lineHt + fi.ascent);
+      DrawString(statLine[i])
+   end;
+   if picShown then
+      PicRedraw                         { REV K: the picture under the title }
+end;
+
+procedure DrawOne (i : integer);
+{ Repaint pane line i only: no flash while typing (2/10 bench, 16-Oct). }
+var fi : FontInfo;
+    r  : Rect;
+begin
+   if myWindow = nil then
+      exit(DrawOne);
+   SetPort(myWindow);
+   r := myWindow^.portRect;
+   r.top := 6 + (i - 1) * lineHt;
+   r.bottom := r.top + lineHt;
+   EraseRect(r);
+   GetFontInfo(fi);
+   MoveTo(10, 6 + (i - 1) * lineHt + fi.ascent);
+   DrawString(statLine[i])
+end;
+
+procedure AddLine (var s : StatStr);
+{ Append a line; scroll the list up when full.  Only a scroll repaints the whole pane; }
+{ otherwise just the new line is drawn (no flash as a page fills, 2/10 bench 16-Oct).   }
+var i      : integer;
+    scroll : boolean;
+begin
+   scroll := statCnt >= maxLines;
+   if not scroll then
+      statCnt := statCnt + 1
+   else
+      for i := 1 to maxLines - 1 do
+         statLine[i] := statLine[i + 1];
+   statLine[statCnt] := s;
+   if not quiet then begin
+      if scroll then DrawShow else DrawOne(statCnt)
+   end
+end;
+
+procedure SetLast (var s : StatStr);
+{ Replace the last line and repaint that line only. }
+begin
+   if statCnt = 0 then
+      AddLine(s)
+   else begin
+      statLine[statCnt] := s;
+      if not quiet then DrawOne(statCnt)
+   end
+end;
+
+procedure AddBig (var big : Str255);
+{ Clip a long string and append it. }
+var out : StatStr;
+begin
+   Clip(big, out);
+   AddLine(out)
+end;
+
+procedure SetBig (var big : Str255);
+{ Clip a long string and put it in place of the last line. }
+var out : StatStr;
+begin
+   Clip(big, out);
+   SetLast(out)
+end;
+
+procedure LogMode;
+{ Clear the pane for a fresh run of lines.  Since AddLine draws only the }
+{ new line, the pane is erased here, once per screen; otherwise the last }
+{ screen's lower lines stayed under a short new one (LisaEm, 16-Oct-2026). }
+begin
+   statCnt := 0;
+   picShown := false                    { REV K: a new screen has no picture };
+   if (not quiet) and (myWindow <> nil) then begin
+      SetPort(myWindow);
+      EraseRect(myWindow^.portRect)
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ A key or a click stops a fetch; the shared pieces: LisaFuji's.         }
+{------------------------------------------------------------------------}
+
+procedure ProcessTheEvent; FORWARD;
+
+function UserAborted : boolean;
+begin
+   UserAborted := false;
+   if not EventAvail then
+      exit(UserAborted);
+   GetEvent(theEvent);
+   if (theEvent.what = keyDown) or (theEvent.what = buttonDown) then begin
+      cancelled := true;
+      UserAborted := true
+   end
+   else begin
+      ProcessTheEvent;
+      if toldToDie or (myWindow = nil) then begin
+         cancelled := true;
+         UserAborted := true
+      end
+   end
+end;
+
+procedure Head (var ttl : StatStr);
+{ Clear the pane; version and speed, the title, a blank line. }
+var part : Str255;
+    big  : Str255;
+    row  : StatStr;
+begin
+   LogMode;
+   FnNum(curBaud, part);
+   big := concat(lfbVersion, '     Serial B, ');
+   big := concat(big, concat(part, ' baud'));
+   AddBig(big);
+   AddLine(ttl);
+   row := '';
+   AddLine(row)
+end;
+
+procedure WhyTxt (rc : integer; var txt : Str255);
+{ A result code from FnBus in plain words. }
+begin
+   if rc = fnNakd then
+      txt := 'the FujiNet refused the command (NAK)'
+   else if rc = fnNoRep then
+      txt := 'no reply'
+   else if rc = fnBadFr then
+      txt := 'the reply was damaged (length or checksum wrong)'
+   else if rc = fnPortEr then
+      txt := 'the serial port gave an error'
+   else if rc = fnBadArg then
+      txt := 'not sent: the request was not allowed'
+   else if rc = fnShort then
+      txt := 'the reply was not the data expected'
+   else if rc = fnStall then
+      txt := 'the reply stopped part-way'
+   else
+      txt := 'unknown result'
+end;
+
+procedure SayFail (var lead : StatStr; rc : integer);
+{ Replace the last line with: lead FAIL: reason.  Then, when nothing    }
+{ usable came back, the things to check.                                 }
+var reason : Str255;
+    big : Str255;
+    row : StatStr;
+begin
+   WhyTxt(rc, reason);
+   big := concat(lead, concat('FAIL: ', reason));
+   SetBig(big);
+   if (rc = fnNoRep) or (rc = fnStall) or (rc = fnBadFr) then begin
+      row := '   Check: FujiNet powered?  Cable on Serial B, no null modem?';
+      AddLine(row);
+      row := '   Same speed at both ends (baud= on the SD card, then restart)?';
+      AddLine(row)
+   end
+   else if rc = fnPortEr then begin
+      FnNum(fnEcode, reason);
+      big := concat('   (OS ecode ', concat(reason, ')'));
+      AddBig(big)
+   end
+end;
+
+function LineUp : boolean;
+{ Open Serial B at curBaud.  FALSE: the reason and the fix are shown.   }
+var part : Str255;
+    big  : Str255;
+    row  : StatStr;
+begin
+   LineUp := true;
+   if FnPortUp(curBaud) then
+      exit(LineUp);
+   LineUp := false;
+   FnNum(fnEcode, part);
+   big := concat('Serial B would not open (ecode ', part);
+   FnNum(fnMntEc, part);
+   big := concat(big, concat(', mount ', part));
+   big := concat(big, ').');
+   AddBig(big);
+   row := 'Quit LISACom if it is running: only one tool can hold Serial B.';
+   AddLine(row);
+   row := 'Otherwise open Preferences, choose Connect Devices, and set the';
+   AddLine(row);
+   row := 'Serial B Connector to Serial Cable.  Then try again.';
+   AddLine(row)
+end;
+
+procedure HelpWire;
+var row : StatStr;
+begin
+   promptOn := false;
+   quiet := true;
+   row := 'Wiring and set-up';
+   Head(row);
+   row := 'FujiNet: power it from USB-C.  Connect Lisa Serial B to its 9-pin';
+   AddLine(row);
+   row := 'socket, wired as for a modem: NO null-modem adapter.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'SD card: in the file fnconfig.ini, under [Serial], put baud=9600';
+   AddLine(row);
+   row := 'and restart the FujiNet.  The Speed menu here must say the same.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'Lisa: Preferences, Connect Devices, Serial B Connector set to';
+   AddLine(row);
+   row := 'Serial Cable.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'Quit LISACom first: only one tool can hold Serial B at a time.';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+procedure SetSpeed (baud : longint);
+var row : StatStr;
+begin
+   promptOn := false;
+   curBaud := baud;
+   quiet := true;
+   row := 'Speed changed.';
+   Head(row);
+   row := 'The FujiNet must be set to the same speed: on its SD card, in';
+   AddLine(row);
+   row := 'fnconfig.ini under [Serial], set baud= to this number, then';
+   AddLine(row);
+   row := 'restart the FujiNet.  Press H to test.';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+procedure NwSub (var s : PageStr; from, cnt : integer; var out : Str255);
+{ out = at most cnt characters of s, starting at from.  Never asks COPY }
+{ for more than is there (the INS REV B lesson, see Clip).              }
+var room : integer;
+begin
+   out := '';
+   room := length(s) - from + 1;
+   if cnt > room then cnt := room;
+   if (from >= 1) and (cnt > 0) then
+      out := copy(s, from, cnt)
+end;
+
+function NwNumIn (var s : PageStr; var p : integer) : longint;
+{ The digits of s from position p, as a number; p ends on the first     }
+{ character that is not a digit.  No digits gives 0.                    }
+var n  : longint;
+    go : boolean;
+begin
+   n := 0;
+   go := true;
+   while go do begin
+      if p > length(s) then
+         go := false
+      else if (s[p] < '0') or (s[p] > '9') then
+         go := false
+      else if n > 99999999 then
+         go := false
+      else begin
+         n := n * 10 + (ord(s[p]) - 48);
+         p := p + 1
+      end
+   end;
+   NwNumIn := n
+end;
+
+{------------------------------------------------------------------------}
+{ The browser.                                                           }
+{------------------------------------------------------------------------}
+
+procedure GwDefaults;
+{ The built-in list: the public Pi, the Banana through the FujiNet, the Banana through PCFuji. }
+begin
+   gwN := 3;
+   gwList[1].name := 'the home Pi, public (lisa-gw1)';
+   gwList[1].url  := gwPub;
+   gwList[1].key  := gwPubKey;
+   gwList[2].name := 'the Banana, through the FujiNet';
+   gwList[2].url  := gwLan;
+   gwList[2].key  := '';
+   gwList[3].name := 'the Banana, through PCFuji';
+   gwList[3].url  := gwBanana;
+   gwList[3].key  := ''
+end;
+
+procedure GwPutS (var s : Str255);
+{ Append s to gwBuf. }
+var i : integer;
+begin
+   for i := 1 to length(s) do
+      if gwBufN < gwBufLen then begin
+         gwBuf[gwBufN] := ord(s[i]);
+         gwBufN := gwBufN + 1
+      end
+end;
+
+procedure GwSave;
+{ Write GATEWAYS.TEXT beside the tool from the list: name|address|key per line. }
+var path  : Pathname;
+    ref   : integer;
+    ec, se: integer;
+    wrote : longint;
+    i     : integer;
+    s     : Str255;
+begin
+   gwBufN := 0;
+   s := '; LisaFuji Browser gateways: name|address|key, one per line.';
+   s := concat(s, '  Edit on the PC, send with LisaFileMover.');
+   GwPutS(s);
+   s := ' ';
+   s[1] := chr(13);
+   GwPutS(s);
+   for i := 1 to gwN do begin
+      s := concat(gwList[i].name, concat('|', concat(gwList[i].url, concat('|', gwList[i].key))));
+      GwPutS(s);
+      s := ' ';
+      s[1] := chr(13);
+      GwPutS(s)
+   end;
+   if gwTown <> '' then begin
+      s := concat('town|', concat(gwTown, '|'));
+      GwPutS(s);
+      s := ' ';
+      s[1] := chr(13);
+      GwPutS(s)
+   end;
+   path := concat(myVol, gwFile);
+   Sched_Class(se, false);
+   MAKE_FILE(ec, path, 0);
+   if (ec = 0) or (ec = 890) then begin
+      OPEN(ec, path, ref, [DWrite]);
+      if ec = 0 then begin
+         wrote := 0;
+         WRITE_DATA(ec, ref, ord4(@gwBuf), gwBufN, wrote, sequential, 0);
+         CLOSE_OBJECT(ec, ref)
+      end
+   end;
+   Sched_Class(se, true)
+end;
+
+procedure GwLoad;
+{ Read GATEWAYS.TEXT beside the tool.  A line is name|address|key; lines  }
+{ without a | are ignored, so a Workshop .TEXT header does no harm.  If   }
+{ the file is missing, the defaults are written there for next time.      }
+var path  : Pathname;
+    ref   : integer;
+    ec, se: integer;
+    got   : longint;
+    i, b  : integer;
+    fld   : integer;
+    nm    : Str255;
+    ad    : Str255;
+    ky    : Str255;
+    ch    : string[1];
+    skip  : boolean;           { a comment line: starts with ; }
+
+   procedure Take;
+   begin
+      if (not skip) and (fld >= 1) and (nm = 'town') then begin
+         if length(ad) > 60 then ad := copy(ad, 1, 60);
+         gwTown := ad
+      end
+      else if (not skip) and (fld >= 1) and (nm <> '') and (ad <> '') and (gwN < gwMax) then begin
+         gwN := gwN + 1;
+         { COPY does not clip on the Lisa: only cut what is really longer }
+         if length(nm) > 80 then nm := copy(nm, 1, 80);
+         if length(ad) > 80 then ad := copy(ad, 1, 80);
+         if length(ky) > gwKeyCap then ky := copy(ky, 1, gwKeyCap);
+         gwList[gwN].name := nm;
+         gwList[gwN].url  := ad;
+         gwList[gwN].key  := ky
+      end;
+      nm := '';
+      ad := '';
+      ky := '';
+      fld := 0;
+      skip := false
+   end;
+
+begin
+   path := concat(myVol, gwFile);
+   Sched_Class(se, false);
+   OPEN(ec, path, ref, [DRead]);
+   Sched_Class(se, true);
+   if ec > 0 then begin
+      GwSave;
+      exit(GwLoad)
+   end;
+   got := 0;
+   Sched_Class(se, false);
+   READ_DATA(ec, ref, ord4(@gwBuf), gwBufLen, got, sequential, 0);
+   CLOSE_OBJECT(ec, ref);
+   Sched_Class(se, true);
+   if got <= 0 then
+      exit(GwLoad);
+   gwBufN := got;
+   gwN := 0;
+   nm := '';
+   ad := '';
+   ky := '';
+   fld := 0;
+   skip := false;
+   ch := ' ';
+   for i := 0 to gwBufN - 1 do begin
+      b := gwBuf[i];
+      if b < 0 then b := b + 256;
+      if b = 13 then
+         Take
+      else if (b = 59) and (fld = 0) and (nm = '') then
+         skip := true
+      else if b = 124 then
+         fld := fld + 1
+      else if (b >= 32) and (b <= 126) then begin
+         ch[1] := chr(b);
+         if (fld = 0) and (length(nm) < 80) then
+            nm := concat(nm, ch)
+         else if (fld = 1) and (length(ad) < 80) then
+            ad := concat(ad, ch)
+         else if (fld = 2) and (length(ky) < gwKeyCap) then
+            ky := concat(ky, ch)
+      end
+   end;
+   Take;
+   if gwN = 0 then
+      GwDefaults;
+   if gwSel > gwN then
+      gwSel := 1
+end;
+
+procedure GwBase (var s : Str255);
+{ The address of the gateway in use. }
+begin
+   s := gwList[gwSel].url
+end;
+
+procedure GwName (var s : Str255);
+{ The gateway in use, in words. }
+begin
+   s := gwList[gwSel].name
+end;
+
+procedure GwShowList;
+{ The Gateway menu's list: every gateway, the one in use marked. }
+var row : StatStr;
+    big : Str255;
+    num : Str255;
+    i   : integer;
+begin
+   promptOn := false;
+   pgMode := 0;
+   quiet := true;
+   row := 'Gateways, from GATEWAYS.TEXT beside the tool.  Gateway menu, Next, cycles them.';
+   Head(row);
+   for i := 1 to gwN do begin
+      FnNum(i, num);
+      big := concat(num, concat(') ', gwList[i].name));
+      if i = gwSel then big := concat(big, '   <- in use');
+      AddBig(big);
+      big := concat('     ', gwList[i].url);
+      if gwList[i].key <> '' then big := concat(big, '   (with a key)');
+      AddBig(big)
+   end;
+   quiet := false;
+   DrawShow
+end;
+
+procedure GwEnc (var q : UrlStr; var out : Str255);
+{ q as an address needs it: letters, digits and - _ . ~ as they are,    }
+{ anything else as %XX.                                                  }
+var i, b : integer;
+    tmp  : string[3];
+    hx   : string[16];
+    c    : char;
+begin
+   hx := '0123456789ABCDEF';
+   out := '';
+   for i := 1 to length(q) do begin
+      c := q[i];
+      if ((c >= 'A') and (c <= 'Z')) or ((c >= 'a') and (c <= 'z'))
+         or ((c >= '0') and (c <= '9')) or (c = '-') or (c = '_')
+         or (c = '.') or (c = '~') then begin
+         tmp := ' ';
+         tmp[1] := c
+      end
+      else begin
+         b := ord(c);
+         tmp := '%00';
+         tmp[2] := hx[(b div 16) + 1];
+         tmp[3] := hx[(b mod 16) + 1]
+      end;
+      if length(out) < 200 then
+         out := concat(out, tmp)
+   end
+end;
+
+procedure PicFlush;
+{ Write the rows waiting in picBat to LFBPICT.DATA. }
+var ec, se: integer;
+    wrote : longint;
+begin
+   if picFOk and (picBatC > 0) then begin
+      Sched_Class(se, false);
+      WRITE_DATA(ec, picRef, ord4(@picBat), picBatC * (picW div 8), wrote, sequential, 0);
+      if ec > 0 then picFOk := false;
+      Sched_Class(se, true)
+   end;
+   picBatC := 0
+end;
+
+procedure PicKeep (start : boolean);
+{ start: begin writing LFBPICT.DATA beside the tool.  Not start: finish it. }
+var path  : Pathname;
+    ec, se: integer;
+begin
+   Sched_Class(se, false);
+   if start then begin
+      picFOk := false;
+      path := concat(myVol, picFile);
+      MAKE_FILE(ec, path, 0);
+      if (ec <= 0) or (ec = 890) then begin
+         OPEN(ec, path, picRef, [DWrite]);
+         picFOk := ec <= 0
+      end
+   end
+   else if picFOk then begin
+      Sched_Class(se, true);
+      PicFlush;
+      Sched_Class(se, false);
+      TRUNCATE(ec, picRef);
+      CLOSE_OBJECT(ec, picRef);
+      picFOk := false
+   end;
+   Sched_Class(se, true)
+end;
+
+function PicStart (var s : PageStr) : boolean;
+{ s is "P<doc> <w> <h>": a picture follows.  Set it up; FALSE if s is wrong. }
+var p    : integer;
+    d, w : longint;
+    h    : longint;
+begin
+   PicStart := false;
+   p := 2;
+   d := NwNumIn(s, p);
+   if (d <= 0) or (p >= length(s)) then exit(PicStart);
+   p := p + 1;
+   w := NwNumIn(s, p);
+   if p >= length(s) then exit(PicStart);
+   p := p + 1;
+   h := NwNumIn(s, p);
+   if (w < 8) or (w > picMaxW) or ((w mod 8) <> 0) or (h < 1) or (h > picMaxH) then
+      exit(PicStart);
+   pgDoc := d;
+   pgPage := 1;
+   pgPgs := 1;
+   pgLinks := 0;
+   picW := w;
+   picH := h;
+   picX := (winW - picW) div 2;
+   picRows := 0;
+   picBatC := 0;
+   picCst.ln := ord4(@picBuf.a);
+   picBits.baseAddr := picCst.qp;
+   picBits.rowBytes := picRb;
+   SetRect(picBits.bounds, 0, 0, picW, 1);
+   picOn := true;
+   picGot := true;
+   pgMode := 5;
+   PicKeep(true);
+   PicStart := true
+end;
+
+procedure PicFrame;
+{ The title and site lines have come: the picture's screen, still empty. }
+var i   : integer;
+    s   : PageStr;
+    big : Str255;
+    row : StatStr;
+begin
+   promptOn := false;
+   quiet := true;
+   LogMode;
+   s := pgLine[2];
+   NwSub(s, 1, 80, big);
+   Clip(big, pgTitle);
+   AddLine(pgTitle);
+   s := pgLine[3];
+   NwSub(s, 1, 80, big);
+   Clip(big, pgSite);
+   AddLine(pgSite);
+   row := '';
+   for i := 3 to maxLines - 1 do
+      AddLine(row);
+   row := 'B back  R reload  H start  G address  S search  ? help';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+procedure PicLine (var s : PageStr);
+{ One picture row: 6-bit groups, chr(48 + v), 4 characters to 3 bytes; an }
+{ empty line is a white row.  Drawn at once, and written to the file.      }
+var i, n, k, nb : integer;
+    c           : integer;
+    acc         : longint;
+
+   procedure Put (idx : integer; v : longint);
+   var b : integer;
+   begin
+      if idx < nb then begin
+         b := v;
+         if b > 127 then b := b - 256;
+         picBuf.a[idx] := b
+      end
+   end;
+
+begin
+   if picRows >= picH then
+      exit(PicLine);
+   nb := picW div 8;
+   for i := 0 to picRb do
+      picBuf.a[i] := 0;
+   k := 0;
+   i := 1;
+   while (i + 3 <= length(s)) and (k < nb) do begin
+      acc := 0;
+      for n := 0 to 3 do begin
+         c := ord(s[i + n]) - 48;
+         if (c < 0) or (c > 63) then c := 0;
+         acc := acc * 64 + c
+      end;
+      Put(k, acc div 65536);
+      Put(k + 1, (acc div 256) mod 256);
+      Put(k + 2, acc mod 256);
+      k := k + 3;
+      i := i + 4
+   end;
+   if length(s) > 0 then
+      PicRow(picRows);
+   if picFOk then begin
+      for n := 0 to nb - 1 do
+         picBat[picBatC * nb + n] := picBuf.a[n];
+      picBatC := picBatC + 1;
+      if picBatC >= picBatN then
+         PicFlush
+   end;
+   picRows := picRows + 1
+end;
+
+function GwGet (var url : Str255) : boolean;
+{ Fetch url through the FujiNet into pgLine (pgCnt lines, each cut at   }
+{ pgWide characters, LF ends a line, CR is dropped, UTF-8 letters are   }
+{ folded to plain ones, anything else that will not print is a dot).   }
+{ TRUE: something usable arrived.  FALSE: the reason is on the pane.    }
+{ This is LisaFuji's NwGet with the gateway's name in the messages.     }
+var rc, k, i, b : integer;
+    total     : longint;
+    idle      : longint;
+    idleT0    : longint;
+    idleClk   : boolean;
+    done      : boolean;
+    fail      : boolean;
+    cur       : PageStr;
+    tmp       : string[1];
+    part      : Str255;
+    big       : Str255;
+    row       : StatStr;
+    lead      : StatStr;
+    u1, u2    : integer;      { a UTF-8 character being collected }
+    uLeft     : integer;      { bytes of it still to come }
+    lat       : string[64];   { C3 80..BF as plain letters }
+
+   procedure GwPut (b : integer);
+   begin
+      if length(cur) < pgWide then begin
+         tmp[1] := chr(b);
+         cur := concat(cur, tmp)
+      end
+   end;
+
+   procedure GwLine;
+   { A whole line: the reply's text, or (REV K) a picture's row. }
+   begin
+      if picOn and (pgCnt >= 3) then
+         PicLine(cur)
+      else if pgCnt < pgMax then begin
+         pgCnt := pgCnt + 1;
+         pgLine[pgCnt] := cur;
+         if (pgCnt = 1) and (length(cur) >= 5) then
+            if cur[1] = 'P' then
+               if PicStart(cur) then ;
+         if picOn and (pgCnt = 3) then
+            PicFrame
+      end
+   end;
+
+   procedure GwFlush;
+   begin
+      if uLeft > 0 then begin
+         uLeft := 0;
+         if (u1 >= 192) and (u2 = 0) then
+            GwPut(ord(lat[u1 - 191]))
+         else
+            GwPut(63)
+      end
+   end;
+
+   procedure GwFold (u1, u2, u3 : integer);
+   var k : integer;
+   begin
+      if u1 = 195 then begin
+         k := u2 - 127;
+         if (k >= 1) and (k <= 64) then
+            GwPut(ord(lat[k]))
+         else
+            GwPut(63)
+      end
+      else if (u1 = 194) and (u2 = 160) then
+         GwPut(32)
+      else if (u1 = 226) and (u2 = 128) then begin
+         if ((u3 >= 128) and (u3 <= 138)) or (u3 = 175) then
+            GwPut(32)
+         else if (u3 = 146) or (u3 = 147) or (u3 = 148) then
+            GwPut(45)
+         else if (u3 = 152) or (u3 = 153) then
+            GwPut(39)
+         else if (u3 = 156) or (u3 = 157) then
+            GwPut(34)
+         else if u3 = 166 then begin
+            GwPut(46);
+            GwPut(46);
+            GwPut(46)
+         end
+         else
+            GwPut(63)
+      end
+      else
+         GwPut(63)
+   end;
+
+begin
+   GwGet := false;
+   cancelled := false;
+   svcEmpty := false;
+   pgCnt := 0;
+   picOn := false;                      { REV K }
+   picGot := false;
+   lat := 'AAAAAAACEEEEIIIIDNOOOOOxOUUUUYTsaaaaaaaceeeeiiiidnooooo/ouuuuyty';
+   uLeft := 0;
+   u1 := 0;
+   u2 := 0;
+   row := 'Asking the gateway ...  (any key stops it)';
+   AddLine(row);
+   if not LineUp then
+      exit(GwGet);
+
+   lead := 'Web:  ';
+   { REV E: a fetch that timed out leaves the FujiNet's channel open, and the  }
+   { next OPEN then fails with status 144.  Close first; any answer or none.    }
+   k := FnNClos;
+   rc := FnNOpen(url, 4, 0);
+   if rc <> fnOK then begin
+      SayFail(lead, rc);
+      k := FnNClos;
+      FnPortDn;
+      exit(GwGet)
+   end;
+   if fnStat = 136 then begin                     { opened, but nothing to read }
+      svcEmpty := true;
+      row := 'Nothing came back from the gateway.';
+      SetLast(row);
+      k := FnNClos;
+      FnPortDn;
+      exit(GwGet)
+   end;
+   if fnStat <> 1 then begin
+      FnNum(fnStat, part);
+      if fnStat = 170 then
+         big := 'Status 170: the gateway was not found.  Is it running?  Is it the right one?'
+      else if fnStat = 207 then
+         big := 'Status 207: no connection to the gateway.'
+      else
+         big := concat('Refused by the gateway, status ', part);
+      SetBig(big);
+      k := FnNClos;
+      FnPortDn;
+      exit(GwGet)
+   end;
+
+   total := 0;
+   idle  := 0;
+   FnTStart(idleT0, idleClk);
+   done  := false;
+   fail  := false;
+   cur   := '';
+   tmp   := ' ';
+   rc    := fnOK;
+
+   while not (done or fail or cancelled) do begin
+      if fnWait = 0 then begin
+         rc := FnNStat;
+         if rc <> fnOK then
+            fail := true
+         else if fnWait = 0 then begin
+            if fnStat = 136 then
+               done := true                       { end of data }
+            else if (fnConn = 0) and (fnStat <> 1) then
+               done := true                       { the far end is gone }
+            else begin
+               FnNap(100);
+               idle := idle + 100;
+               if FnTOver(idleT0, idleClk, idle, idleMax) then
+                  fail := true                    { rc stays fnOK }
+            end
+         end
+      end
+      else begin
+         k := fnRdMax;
+         if fnWait < k then
+            k := fnWait;
+         rc := FnNRead(k);
+         if rc <> fnOK then
+            fail := true
+         else begin
+            idle := 0;
+            FnTStart(idleT0, idleClk);
+            total := total + fnPlLen;
+            for i := 0 to fnPlLen - 1 do begin
+               b := FnPlB(i);
+               if b = 10 then begin
+                  GwFlush;
+                  GwLine;
+                  cur := ''
+               end
+               else if b <> 13 then begin
+                  if b = 9 then b := 32;
+                  if b < 128 then begin
+                     if b < 32 then b := 46;
+                     GwFlush;
+                     GwPut(b)
+                  end
+                  else if b >= 192 then begin
+                     GwFlush;
+                     u1 := b;
+                     u2 := 0;
+                     if b >= 240 then
+                        uLeft := 3
+                     else if b >= 224 then
+                        uLeft := 2
+                     else
+                        uLeft := 1
+                  end
+                  else if uLeft > 0 then begin
+                     uLeft := uLeft - 1;
+                     if u2 = 0 then u2 := b;
+                     if uLeft = 0 then GwFold(u1, u2, b)
+                  end
+                  else
+                     GwPut(63)
+               end
+            end;
+            FnNum(total, part);
+            big := concat('Asking the gateway ...  ', concat(part, ' bytes'));
+            if not picOn then
+               SetBig(big)                     { a picture uses the whole window }
+         end
+      end;
+      if not (done or fail) then
+         if UserAborted then
+            cancelled := true
+   end;
+
+   if length(cur) > 0 then                         { a last line with no LF }
+      GwLine;
+
+   k := FnNClos;
+   FnPortDn;
+   if picOn then begin
+      PicKeep(false);
+      picOn := false
+   end;
+
+   if cancelled then begin
+      row := 'Stopped by a key or click.';
+      SetLast(row)
+   end
+   else if fail and (rc = fnOK) then begin
+      row := 'Gave up: nothing arrived for 15 seconds.';
+      SetLast(row)
+   end
+   else if fail then
+      SayFail(lead, rc)
+   else if pgCnt = 0 then begin
+      svcEmpty := true;
+      row := 'Nothing came back from the gateway.';
+      SetLast(row)
+   end
+   else
+      GwGet := true
+end;
+
+procedure PgKeys;
+{ The key line at the bottom of a page or a links list. }
+var row : StatStr;
+begin
+   if pgMode = 2 then
+      row := 'SPACE next  P previous  L back to the page  B back  H start  G address  ? help'
+   else
+      row := 'SPACE next  P previous  B back  H start  G address  S search  L links  ? help';
+   AddLine(row)
+end;
+
+procedure PgFail;
+{ After a failed fetch: what can be done next. }
+var row : StatStr;
+begin
+   pgMode := 3;
+   row := '';
+   AddLine(row);
+   row := 'R = try again   B = back   H = start page   G = address   S = search';
+   AddLine(row)
+end;
+
+function PgParse : boolean;
+{ The reply in pgLine: line 1 "D<doc> <page>/<pages>", line 2 the title, }
+{ line 3 the site and link count.  FALSE: an ERROR line, or something    }
+{ unexpected; the reason is on the pane.                                   }
+var s   : PageStr;
+    p   : integer;
+    v   : longint;
+    ok  : boolean;
+    big : Str255;
+    row : StatStr;
+begin
+   PgParse := false;
+   s := pgLine[1];
+   if pos('ERROR:', s) = 1 then begin
+      row := 'The gateway says:';
+      SetLast(row);
+      NwSub(s, 8, 80, big);
+      AddBig(big);
+      exit(PgParse)
+   end;
+   ok := false;
+   v := 0;
+   if length(s) >= 5 then
+      if s[1] = 'D' then begin
+         p := 2;
+         v := NwNumIn(s, p);
+         if (v > 0) and (p < length(s)) then
+            if s[p] = ' ' then begin
+               pgDoc := v;
+               p := p + 1;
+               v := NwNumIn(s, p);
+               if (v >= 1) and (v <= 9999) and (p < length(s)) then
+                  if s[p] = '/' then begin
+                     pgPage := v;
+                     p := p + 1;
+                     v := NwNumIn(s, p);
+                     if v > 9999 then v := 9999;
+                     if v < pgPage then v := pgPage;
+                     pgPgs := v;
+                     ok := true
+                  end
+            end
+      end;
+   if not ok then begin
+      row := 'The gateway sent something unexpected:';
+      SetLast(row);
+      NwSub(s, 1, 80, big);
+      AddBig(big);
+      exit(PgParse)
+   end;
+   pgTitle := '';
+   pgSite := '';
+   pgLinks := 0;
+   if pgCnt >= 2 then begin
+      s := pgLine[2];
+      NwSub(s, 1, 80, big);
+      Clip(big, pgTitle)
+   end;
+   if pgCnt >= 3 then begin
+      s := pgLine[3];
+      NwSub(s, 1, 80, big);
+      Clip(big, pgSite);
+      p := pos(' links', s);                      { the number before it }
+      if p > 1 then begin
+         v := 0;
+         ok := true;
+         p := p - 1;
+         while ok do begin
+            if p < 1 then
+               ok := false
+            else if (s[p] < '0') or (s[p] > '9') then
+               ok := false
+            else
+               p := p - 1
+         end;
+         p := p + 1;
+         v := NwNumIn(s, p);
+         if v > lnkMax then v := lnkMax;
+         pgLinks := v
+      end
+   end;
+   PgParse := true
+end;
+
+procedure PgDraw;
+{ Title, site line with the page count, a blank line, the text, the keys. }
+var i    : integer;
+    last : integer;
+    s    : PageStr;
+    part : Str255;
+    big  : Str255;
+    row  : StatStr;
+begin
+   promptOn := false;
+   quiet := true;
+   LogMode;
+   AddLine(pgTitle);
+   big := pgSite;
+   FnNum(pgPage, part);
+   big := concat(big, concat('   Page ', part));
+   FnNum(pgPgs, part);
+   big := concat(big, concat(' of ', part));
+   AddBig(big);
+   row := '';
+   AddLine(row);
+   pgFirst := 4;
+   last := pgCnt;
+   if last > 3 + pgRows then
+      last := 3 + pgRows;
+   for i := 4 to last do begin
+      s := pgLine[i];
+      NwSub(s, 1, 80, big);
+      AddBig(big)
+   end;
+   pgLast := statCnt;
+   for i := last + 1 to 3 + pgRows do
+      AddLine(row);                                { row is still empty }
+   PgKeys;
+   quiet := false;
+   DrawShow
+end;
+
+procedure PgPush;
+{ Remember the page shown, for B.  The same page twice is kept once. }
+var i : integer;
+begin
+   if histCnt > 0 then
+      if (hist[histCnt].doc = pgDoc) and (hist[histCnt].page = pgPage) then
+         exit(PgPush);
+   if histCnt < histMax then
+      histCnt := histCnt + 1
+   else
+      for i := 1 to histMax - 1 do
+         hist[i] := hist[i + 1];
+   hist[histCnt].doc := pgDoc;
+   hist[histCnt].page := pgPage
+end;
+
+procedure GwFetch (var req : Str255; isList : boolean);
+{ Send request req (the part after the gateway's address), then show   }
+{ the page that comes back, or why none did.                            }
+var url : Str255;
+    row : StatStr;
+    enc : Str255;
+begin
+   promptOn := false;
+   row := 'Fetching ...';
+   Head(row);
+   GwBase(url);
+   url := concat(url, req);
+   if gwList[gwSel].key <> '' then begin
+      { REV E: the key is a query parameter: ? when the request has none yet, & after one }
+      if pos('?', req) = 0 then
+         url := concat(url, concat('?k=', gwList[gwSel].key))
+      else
+         url := concat(url, concat('&k=', gwList[gwSel].key))
+   end;
+   if gwTown <> '' then begin
+      { REV I: your town, so the weather and space station are yours on any gateway }
+      GwEnc(gwTown, enc);
+      if pos('?', url) = 0 then
+         url := concat(url, concat('?t=', enc))
+      else
+         url := concat(url, concat('&t=', enc))
+   end;
+   if pos('?', url) = 0 then                    { REV K: this Browser can show pictures }
+      url := concat(url, '?pv=1')
+   else
+      url := concat(url, '&pv=1');
+   if not GwGet(url) then begin
+      PgFail;
+      exit(GwFetch)
+   end;
+   if picGot then begin                         { REV K: drawn as it came }
+      pgMode := 4;
+      picShown := picRows > 0;
+      PgPush;
+      exit(GwFetch)
+   end;
+   if not PgParse then begin
+      PgFail;
+      exit(GwFetch)
+   end;
+   if isList then
+      pgMode := 2
+   else
+      pgMode := 1;
+   PgDraw;
+   if not isList then
+      PgPush
+end;
+
+procedure GoHome;
+var req : Str255;
+begin
+   rqKind := 5;
+   req := '/w/home';
+   GwFetch(req, false)
+end;
+
+procedure GoPage (doc : longint; page : integer);
+var req, part : Str255;
+begin
+   rqKind := 2;
+   rqDoc := doc;
+   rqN := page;
+   FnNum(doc, part);
+   req := concat('/w/page?d=', part);
+   FnNum(page, part);
+   req := concat(req, concat('&p=', part));
+   GwFetch(req, false)
+end;
+
+procedure GoLink (doc : longint; n : integer);
+var req, part : Str255;
+begin
+   rqKind := 3;
+   rqDoc := doc;
+   rqN := n;
+   FnNum(doc, part);
+   req := concat('/w/link?d=', part);
+   FnNum(n, part);
+   req := concat(req, concat('&n=', part));
+   GwFetch(req, false)
+end;
+
+procedure GoLinks (doc : longint; page : integer);
+var req, part : Str255;
+begin
+   rqKind := 6;
+   rqDoc := doc;
+   rqN := page;
+   FnNum(doc, part);
+   req := concat('/w/links?d=', part);
+   FnNum(page, part);
+   req := concat(req, concat('&p=', part));
+   GwFetch(req, true)
+end;
+
+procedure GoAddr (var a : UrlStr);
+var req, enc : Str255;
+begin
+   rqKind := 1;
+   rqTxt := a;
+   GwEnc(a, enc);
+   req := concat('/w/open?u=', concat(enc, gwPs));
+   GwFetch(req, false)
+end;
+
+procedure GoFind (var q : UrlStr);
+var req, enc : Str255;
+begin
+   rqKind := 4;
+   rqTxt := q;
+   GwEnc(q, enc);
+   req := concat('/w/find?q=', enc);
+   GwFetch(req, false)
+end;
+
+procedure GoAgain;
+{ R: the last request once more. }
+var row : StatStr;
+begin
+   case rqKind of
+      1 : GoAddr(rqTxt);
+      2 : GoPage(rqDoc, rqN);
+      3 : GoLink(rqDoc, rqN);
+      4 : GoFind(rqTxt);
+      5 : GoHome;
+      6 : GoLinks(rqDoc, rqN);
+      otherwise
+         begin
+            row := 'Nothing to repeat yet.  H fetches the start page.';
+            SetLast(row)
+         end
+   end
+end;
+
+procedure GoBack;
+{ B: the page before this one.  The history then ends there. }
+var row : StatStr;
+    d   : HistRec;
+begin
+   if pgMode = 2 then begin                        { from the links list: the page }
+      GoPage(pgDoc, pgPage);
+      exit(GoBack)
+   end;
+   if histCnt < 2 then begin
+      row := 'Nothing to go back to.';
+      SetLast(row);
+      exit(GoBack)
+   end;
+   d := hist[histCnt - 1];
+   histCnt := histCnt - 2;
+   GoPage(d.doc, d.page)
+end;
+
+procedure GoNext;
+begin
+   if pgPage < pgPgs then begin
+      if pgMode = 2 then
+         GoLinks(pgDoc, pgPage + 1)
+      else
+         GoPage(pgDoc, pgPage + 1)
+   end
+end;
+
+procedure GoPrev;
+begin
+   if pgPage > 1 then begin
+      if pgMode = 2 then
+         GoLinks(pgDoc, pgPage - 1)
+      else
+         GoPage(pgDoc, pgPage - 1)
+   end
+end;
+
+procedure FollowN (n : longint);
+{ Follow link n of the document shown, if there is one. }
+var part, big : Str255;
+begin
+   if (n >= 1) and (n <= pgLinks) then
+      GoLink(pgDoc, n)
+   else begin
+      FnNum(pgLinks, part);
+      big := concat('This page has links 1 to ', concat(part, '.'));
+      SetBig(big)
+   end
+end;
+
+procedure PgClick (pt : Point);
+{ A click in the window: on a "[n]" in the text it follows link n.  The }
+{ line is found from the click's height, the "[n]" by measuring the text }
+{ before it with the font in use.                                         }
+var ln, p, q, x1, x2 : integer;
+    n   : longint;
+    s   : PageStr;
+    pre : Str255;
+    row : StatStr;
+    hit : boolean;
+begin
+   if (pgMode <> 1) and (pgMode <> 2) then
+      exit(PgClick);
+   SetPort(myWindow);                             { for StringWidth's font }
+   { theEvent.where is already in the window's own coordinates (checked  }
+   { in LisaEm, 14-Oct-2026): no GlobalToLocal here.                      }
+   ln := (pt.v - textY) div lineHt + 1;
+   if (ln < pgFirst) or (ln > pgLast) then
+      exit(PgClick);
+   s := statLine[ln];
+   hit := false;
+   p := 1;
+   while (p <= length(s)) and (not hit) do begin
+      if s[p] = '[' then begin
+         q := p + 1;
+         n := NwNumIn(s, q);
+         if (n > 0) and (q <= length(s)) then
+            if s[q] = ']' then begin
+               NwSub(s, 1, p - 1, pre);
+               x1 := textX + StringWidth(pre) - 4;
+               NwSub(s, 1, q, pre);
+               x2 := textX + StringWidth(pre) + 4;
+               if (pt.h >= x1) and (pt.h <= x2) then begin
+                  hit := true;
+                  FollowN(n)
+               end
+               else
+                  p := q
+            end
+      end;
+      p := p + 1
+   end;
+   if not hit then begin
+      row := 'Click a link''s number, such as [3], or type it and press RETURN.';
+      SetLast(row)
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ The start screen and the help page.                                    }
+{------------------------------------------------------------------------}
+
+procedure StartScreen;
+var row : StatStr;
+    big : Str255;
+    nm  : Str255;
+begin
+   promptOn := false;
+   pgMode := 0;
+   quiet := true;
+   row := 'A text web browser.  Pages come from a LisaWeb gateway through the FujiNet.';
+   Head(row);
+   row := 'H = the start page: a list of places to go';
+   AddLine(row);
+   row := 'G = go to an address         S = search';
+   AddLine(row);
+   row := 'On a page: click a link''s number, or type the number and press RETURN.';
+   AddLine(row);
+   row := '   SPACE = next page   P = previous   B = back   R = reload   L = links';
+   AddLine(row);
+   row := '? = help      W = wiring and set-up';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   GwName(nm);
+   big := concat('Gateway: ', concat(nm, '  (Gateway menu to change)'));
+   AddBig(big);
+   row := '';
+   AddLine(row);
+   row := 'Nothing is sent to the FujiNet until you press one of these keys.';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+procedure HelpUse;
+var row : StatStr;
+begin
+   promptOn := false;
+   quiet := true;
+   row := 'How to use';
+   Head(row);
+   row := 'H fetches the start page.  Links show as [3]: click the number, or type';
+   AddLine(row);
+   row := 'it and press RETURN.  SPACE turns the page, P goes back a page, B goes';
+   AddLine(row);
+   row := 'back to the page you came from, R fetches the page again.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'G asks for an address: type it (www. and https:// are added for you) and';
+   AddLine(row);
+   row := 'press RETURN.  S asks for words to search for.  L lists the addresses of';
+   AddLine(row);
+   row := 'the links on the page you are reading.  Any key or click stops a fetch.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'The gateway (Gateway menu) does the fetching and sends 14 lines at a time.';
+   AddLine(row);
+   row := 'Pages that have expired there (after an hour) are fetched afresh.';
+   AddLine(row);
+   row := 'Speed menu: start at 9600.  It must match the FujiNet''s SD card.';
+   AddLine(row);
+   row := 'Pictures show as [picture: a Lisa 2] [7]: follow 7 to see it, B comes back.';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+{------------------------------------------------------------------------}
+{ The typed prompt, on the last pane line.  promptKnd says what it is   }
+{ for: 1 an address, 2 search words, 3 a link number.                    }
+{------------------------------------------------------------------------}
+
+procedure DrawPrompt;
+var big : Str255;
+    n   : integer;
+begin
+   n := length(promptTxt);
+   if length(promptLbl) + n < 78 then
+      big := concat(promptLbl, concat(promptTxt, '_'))
+   else begin
+      big := concat('...', copy(promptTxt, n - 69, 70));
+      big := concat(big, '_')
+   end;
+   SetBig(big)
+end;
+
+procedure AskAddr;
+var row : StatStr;
+begin
+   row := 'Go to an address';
+   Head(row);
+   row := 'Type the address, then RETURN.  www. and https:// are added if needed.';
+   AddLine(row);
+   row := 'Clear cancels.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   promptLbl := 'Address: ';
+   promptTxt := '';
+   promptKnd := 1;
+   promptOn := true;
+   AddLine(row);
+   DrawPrompt
+end;
+
+procedure AskFind;
+var row : StatStr;
+begin
+   row := 'Search';
+   Head(row);
+   row := 'Type a word or two, then RETURN.  Clear cancels.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   promptLbl := 'Search for: ';
+   promptTxt := '';
+   promptKnd := 2;
+   promptOn := true;
+   AddLine(row);
+   DrawPrompt
+end;
+
+procedure AskLink (ch : char);
+{ A digit on a page starts the link-number prompt on the key line. }
+begin
+   promptLbl := 'Link number: ';
+   promptTxt := ' ';
+   promptTxt[1] := ch;
+   promptKnd := 3;
+   promptOn := true;
+   DrawPrompt
+end;
+
+procedure AskKey;
+{ REV H: type the access key for the gateway in use; saved in GATEWAYS.TEXT. }
+var row : StatStr;
+    big : Str255;
+    nm  : Str255;
+begin
+   GwName(nm);
+   big := concat('Access key for ', nm);
+   row := copy(big, 1, 78);
+   if length(big) < 78 then row := big;
+   Head(row);
+   row := 'Type the key you were sent (ask bmwcyclist on LisaList2), then RETURN.';
+   AddLine(row);
+   row := 'It is kept in GATEWAYS.TEXT beside the tool.  Clear cancels.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   promptLbl := 'Key: ';
+   promptTxt := '';
+   promptKnd := 4;
+   promptOn := true;
+   AddLine(row);
+   DrawPrompt
+end;
+
+procedure AskTown;
+{ REV I: your town, for the weather and space-station pages; saved in GATEWAYS.TEXT. }
+var row : StatStr;
+begin
+   row := 'Your town';
+   Head(row);
+   row := 'Type your town and country, e.g.  Cincinnati, Ohio  or  Leeds, UK.';
+   AddLine(row);
+   row := 'RETURN saves it; every gateway then shows your weather.  Clear cancels.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   promptLbl := 'Town: ';
+   promptTxt := '';
+   promptKnd := 5;
+   promptOn := true;
+   AddLine(row);
+   DrawPrompt
+end;
+
+procedure CancelAsk;
+var row : StatStr;
+begin
+   promptOn := false;
+   if promptKnd = 3 then begin                    { back to the key line }
+      statCnt := statCnt - 1;
+      PgKeys;
+      DrawShow
+   end
+   else if (pgMode = 1) or (pgMode = 2) then
+      PgDraw
+   else begin
+      row := 'Cancelled.  Nothing was sent.';
+      SetLast(row)
+   end
+end;
+
+procedure TakePrompt;
+{ RETURN at the prompt. }
+var a : UrlStr;
+    s : PageStr;
+    p : integer;
+    n : longint;
+begin
+   promptOn := false;
+   if length(promptTxt) = 0 then begin
+      CancelAsk;
+      exit(TakePrompt)
+   end;
+   case promptKnd of
+      1 : begin
+             a := promptTxt;
+             if pos('://', a) = 0 then begin
+                if (pos('.', a) > 0) and (pos('www.', a) <> 1) and (pos('/', a) = 0) then
+                   a := concat('www.', a);
+                a := concat('https://', a)
+             end;
+             GoAddr(a)
+          end;
+      2 : begin
+             a := promptTxt;
+             GoFind(a)
+          end;
+      3 : begin
+             s := promptTxt;
+             p := 1;
+             n := NwNumIn(s, p);
+             statCnt := statCnt - 1;
+             PgKeys;
+             FollowN(n)
+          end;
+      5 : begin
+             gwTown := promptTxt;
+             GwSave;
+             promptLbl := 'Town saved in GATEWAYS.TEXT.  H fetches the start page.';
+             SetLast(promptLbl);
+             promptLbl := ''
+          end;
+      4 : begin
+             gwList[gwSel].key := promptTxt;
+             GwSave;
+             promptLbl := 'Key saved in GATEWAYS.TEXT.  H fetches the start page.';
+             SetLast(promptLbl);
+             promptLbl := ''
+          end;
+      otherwise
+
+   end
+end;
+
+procedure PromptKey (ch : char);
+{ RETURN (or ENTER) finishes, Backspace erases, Clear cancels, anything }
+{ printable is added (spaces only in search words; only digits in a    }
+{ link number).                                                          }
+var tmp : string[1];
+    cap : integer;
+    ok  : boolean;
+begin
+   cap := urlCap - 10;
+   if promptKnd = 2 then cap := qCap;
+   if promptKnd = 3 then cap := 3;
+   if promptKnd = 4 then cap := gwKeyCap;
+   if promptKnd = 5 then cap := 60;
+   ok := (ch > ' ') and (ch <= '~');
+   if (ch = ' ') and ((promptKnd = 2) or (promptKnd = 5)) and (length(promptTxt) > 0) then ok := true;
+   if (promptKnd = 3) and ((ch < '0') or (ch > '9')) then ok := false;
+   if (ch = chr(13)) or (ch = chr(3)) then
+      TakePrompt
+   else if ch = chr(27) then
+      CancelAsk
+   else if ch = chr(8) then begin
+      if length(promptTxt) > 0 then begin
+         promptTxt[0] := chr(length(promptTxt) - 1);
+         DrawPrompt
+      end
+   end
+   else if ok and (length(promptTxt) < cap) then begin
+      tmp := ' ';
+      tmp[1] := ch;
+      promptTxt := concat(promptTxt, tmp);
+      DrawPrompt
+   end
+end;
+
+procedure PlainKey (ch : char);
+{ Keys without the Apple key, when no prompt is up. }
+begin
+   if (ch = 'H') or (ch = 'h') then
+      GoHome
+   else if (ch = 'G') or (ch = 'g') then
+      AskAddr
+   else if (ch = 'S') or (ch = 's') then
+      AskFind
+   else if ch = '?' then
+      HelpUse
+   else if (ch = 'W') or (ch = 'w') then
+      HelpWire
+   else if (ch = 'R') or (ch = 'r') then
+      GoAgain
+   else if (ch = 'B') or (ch = 'b') then
+      GoBack
+   else if (pgMode = 1) or (pgMode = 2) then begin
+      if (ch = ' ') or (ch = 'N') or (ch = 'n') then
+         GoNext
+      else if (ch = 'P') or (ch = 'p') then
+         GoPrev
+      else if (ch = 'L') or (ch = 'l') then begin
+         if pgMode = 2 then
+            GoPage(pgDoc, pgPage)
+         else
+            GoLinks(pgDoc, pgPage)
+      end
+      else if (ch >= '0') and (ch <= '9') then
+         AskLink(ch)
+   end
+end;
+
+procedure doUpdateEvent (normal : boolean; window : WindowPtr);
+begin
+   if normal then BeginUpdate(window);
+   DrawShow;
+   if normal then EndUpdate(window)
+end;
+
+procedure InitNewDoc (window : WindowPtr);
+begin
+   myWindow := window;
+   TakeWindow(myWindow);
+   FolderSize(myWindow, winW, winH, false);
+   SetPort(myWindow);
+   ValidRect(myWindow^.portRect);
+
+   StartScreen;                         { opens on the key list }
+   doUpdateEvent(false, myWindow);
+
+   if activeFolder = myWindow then
+      PutUpMenus
+end;
+
+procedure DoFilerEvent;
+var wantsOpen : boolean;
+begin
+   HandleFilerOp(wantsOpen);
+   if wantsOpen then
+      InitNewDoc(theEvent.who)
+end;
+
+{------------------------------------------------------------------------}
+{ Commands and events.                                                   }
+{------------------------------------------------------------------------}
+
+procedure MenuCommand (menu, item : integer);
+var err : integer;
+    big : Str255;
+    nm  : Str255;
+begin
+   promptOn := false;                   { a menu command abandons the prompt }
+   case menu of
+
+      mFile :
+         case item of
+            miAsideAll : DoFilingCmd(cmdClosAll);
+            miAside    : DoFilingCmd(cmdClose);
+            miPutAway  :
+               begin
+                  TellFiler(err, docClosd, docPutBack, myWindow);
+                  myWindow := nil
+               end;
+         end;
+
+      mGo :
+         case item of
+            miHome   : GoHome;
+            miBack   : GoBack;
+            miNext   : GoNext;
+            miPrev   : GoPrev;
+            miReload : GoAgain;
+            miAddr   : AskAddr;
+            miSearch : AskFind;
+            miLinks  :
+               if (pgMode = 1) or (pgMode = 2) then
+                  if pgMode <> 4 then GoLinks(pgDoc, pgPage);
+         end;
+
+      mGate :
+         begin
+            if item = miGwNext then begin
+               gwSel := gwSel + 1;
+               if gwSel > gwN then gwSel := 1;
+               GwName(nm);
+               big := concat('Gateway: ', concat(nm, '.  H fetches its start page.'));
+               SetBig(big)
+            end
+            else if item = miGwList then
+               GwShowList
+            else if item = miGwKey then
+               AskKey
+            else if item = miGwTown then
+               AskTown
+         end;
+
+      mSpeed :
+         case item of
+            mi9600  : SetSpeed(9600);
+            mi19200 : SetSpeed(19200);
+         end;
+
+      mHelp :
+         case item of
+            miHelpUse  : HelpUse;
+            miHelpWire : HelpWire;
+         end;
+
+      mVer :
+         case item of
+            miAbout : NoteAlert(allAlerts, alrtAbou);
+         end;
+
+   end
+end;
+
+procedure ProcessTheEvent;
+var theMenu, theItem : integer;
+begin
+   case theEvent.what of
+
+      buttonDown :
+         if theEvent.who = menuFolder then begin
+            MenuSelect(theEvent.where, theMenu, theItem);
+            if (theMenu <> 0) and (theItem <> 0) then
+               MenuCommand(theMenu, theItem);
+            HiLiteMenu(0)
+         end
+         else if theEvent.who = myWindow then begin
+            if not promptOn then
+               PgClick(theEvent.where)
+         end;
+
+      buttonUp :
+         ;
+
+      keyDown :
+         if (theEvent.who = myWindow) and (not theEvent.repeatKey) then begin
+            if theEvent.appleKey then begin
+               if theEvent.ascii = '.' then begin
+                  if promptOn then
+                     CancelAsk
+               end
+               else begin
+                  MenuKey(theEvent.ascii, theMenu, theItem);
+                  if theMenu <> 0 then begin
+                     HiLiteMenu(theMenu);
+                     MenuCommand(theMenu, theItem);
+                     HiLiteMenu(0)
+                  end
+               end
+            end
+            else if promptOn then
+               PromptKey(theEvent.ascii)
+            else
+               PlainKey(theEvent.ascii)
+         end;
+
+      folderActivate :
+         begin
+            TakeControl(theEvent, false, false);
+            PutUpMenus
+         end;
+
+      folderDeactivate :
+         GiveControl(theEvent);
+
+      folderUpdate :
+         if theEvent.who = myWindow then
+            doUpdateEvent(true, theEvent.who)
+         else begin
+            BeginUpdate(theEvent.who);
+            EndUpdate(theEvent.who)
+         end;
+
+      folderMoved :
+         ;
+
+      filerEvent :
+         DoFilerEvent;
+
+      abortEvent, diedEvent, diskEvent, catalogEvent, nilEvent :
+         ;
+
+      otherwise
+
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ Initialize.                                                            }
+{------------------------------------------------------------------------}
+
+procedure Initialize;
+var err      : integer;
+    schedErr : integer;
+    tmp1     : string[1];
+    pcInfo   : procinfoRec;
+    excName  : t_ex_name;
+    myPrefix : TParamAlert;
+    cutAt    : integer;
+begin
+   initing := true;
+
+   excName := 'SYS_TERMINATE';
+   Declare_Excep_Hdl(err, excName, @LastWishes);
+   if err <> 0 then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      halt
+   end;
+
+   toldToDie := false;
+   myWindow  := nil;
+   statCnt   := 0;
+   quiet     := false;
+   promptOn  := false;
+   promptTxt := '';
+   promptLbl := '';
+   promptKnd := 0;
+   curBaud   := 9600;
+   cancelled := false;
+   gwSel     := 1;
+   gwTown    := '';
+   picOn     := false;
+   picGot    := false;
+   picShown  := false;
+   picFOk    := false;
+   picRows   := 0;
+   pgCnt     := 0;
+   svcEmpty  := false;
+   pgMode    := 0;
+   pgDoc     := 0;
+   pgPage    := 1;
+   pgPgs     := 1;
+   pgTitle   := '';
+   pgSite    := '';
+   pgLinks   := 0;
+   pgFirst   := 4;
+   pgLast    := 3;
+   histCnt   := 0;
+   rqKind    := 0;
+   rqTxt     := '';
+   rqDoc     := 0;
+   rqN       := 1;
+   FnInit;
+
+   InitHeap(@myZone[0], @myZone[maxHeap], @OutOfHeapSpace);
+
+   Sched_Class(schedErr, false);
+   Info_Process(err, My_ID, pcInfo);
+   Sched_Class(schedErr, true);
+
+   cutAt := pos('}', pcInfo.progpathname);
+   if (cutAt = 0) or (cutAt > 40) then begin
+      TellFiler(err, initFailed, internalError, nil);
+      halt
+   end;
+   myPrefix := copy(pcInfo.progpathname, 1, cutAt);
+   { the device prefix alone: everything before the open-brace of the  }
+   { tool file set.  chr(123) is the open brace, built the SanName way. }
+   tmp1 := ' ';
+   tmp1[1] := chr(123);
+   cutAt := pos(tmp1, pcInfo.progpathname);
+   if (cutAt > 1) and (cutAt <= 33) then
+      myVol := copy(pcInfo.progpathname, 1, cutAt - 1)
+   else
+      myVol := '-#12-';                { defensive fallback: boot }
+   GwDefaults;
+   GwLoad;                             { REV D: GATEWAYS.TEXT, written if missing }
+
+   InitMP(theHeap, myPrefix, @AlertFailed, alertVerNum,
+          @myMenus[mFile], allAlerts, err);
+   if err > 0 then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      halt
+   end;
+
+   InitWmlCrs(err);
+   if err <> 0 then begin
+      TellFiler(err, initFailed, noDiskSpace, nil);
+      halt
+   end;
+
+   SetPort(deskPort);
+
+   initing := false
+end;
+
+{------------------------------------------------------------------------}
+{ The main program -- two-phase loop, nothing to do when idle.           }
+{------------------------------------------------------------------------}
+
+begin { main program }
+
+   InitGraf(@thePort);
+   OpenWm;
+   Initialize;
+
+   repeat
+
+      while not (ImActive or toldToDie) do begin
+         GetEvent(theEvent);
+         ProcessTheEvent
+      end;
+
+      while ImActive and (not toldToDie) do begin
+         if EventAvail then begin
+            GetEvent(theEvent);
+            ProcessTheEvent
+         end
+         else
+            LetOthersRun
+      end;
+
+   until toldToDie;
+
+   termErr := 0
+end.

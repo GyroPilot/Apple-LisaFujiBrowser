@@ -1,0 +1,26 @@
+$EXEC
+${==========================================================================}
+${ LFB-INSTALL.TEXT -- register LisaFuji Browser (tool 419314) with the Office     }
+${ System.  Run AFTER LFB/MAKE:   R <LFB/INSTALL                           }
+${                                                                          }
+${ InstallTool asks exactly six questions, and every answer -- the Y/N    }
+${ ones included -- must be followed directly by RETURN.  So each answer  }
+${ below sits alone on its line with NOTHING after it; the explanations   }
+${ are on these dollar-brace lines, which the exec drops entirely.  The    }
+${ device answer is the empty line (RETURN = PARAPORT).                   }
+${                                                                          }
+${   1  overwrite an existing tool with the same number?  Y               }
+${   2  device the tool is on  [PARAPORT]                  RETURN          }
+${   3  tool id number                                     419314          }
+${   4  does the tool create documents?                    N               }
+${   5  specify a different opening rectangle?             N               }
+${   6  name of the tool                                   LisaFuji        }
+${==========================================================================}
+R{un}InstallTool
+Y
+
+419314
+N
+N
+LisaFuji Browser
+$ENDEXEC

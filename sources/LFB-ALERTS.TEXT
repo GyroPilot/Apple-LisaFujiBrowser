@@ -1,0 +1,99 @@
+; ==========================================================================
+;  LFB-ALERTS.TEXT -- phrase-file source for LisaFuji Browser (419314).
+;  Compiled by the Workshop 'Alert' tool into T419314PHRASE.
+;  Comments on their OWN lines; blank lines are STRUCTURAL; alert numbers
+;  ascend and 1 and 2 are REQUIRED; each section ends with a lone 0.
+; ==========================================================================
+;
+; REV A -- 14-Oct-2026: first build.  Three alerts, six menus.
+; REV B -- 15-Oct-2026: FnBus frame resync (no phrase changes).  About box says 0.1 REV B.
+; REV C -- 15-Oct-2026: third Gateway menu item, the Banana through the FujiNet (192.168.50.130).  About says 0.1 REV C.
+; REV D -- 16-Oct-2026: Gateway menu = Next Gateway, Show the Gateway List (the list is GATEWAYS.TEXT).  About says 0.1 REV D.
+; REV K -- 17-Oct-2026: 0.2 beta, pictures on click.  About says LisaFuji Browser 0.2 beta (October 2026).
+; REV E -- 16-Oct-2026: the access key goes after ? on a request with no query (H).  About says 0.1 REV E.
+; Cache bytes 4000: well above what the Alert tool suggests for a file
+; this small (below its suggestion the tool pauses for a keypress and
+; eats the next line of the MAKE exec -- the InstallTool lesson).
+; Menus are matched BY POSITION against the mi* constants in LFB-GLOBALS;
+; a '-' separator counts as a position.  Keep the two files in lockstep.
+; No menu item starts with a digit: a line that starts with a number is
+; how this file marks a new menu or alert.
+;
+; ---- FILE HEADER ---------------------------------------------------------
+1
+4
+4000
+?
+Wait
+Stop
+Note
+Caution
+Cancel
+OK
+
+; ==== ALERTS ==============================================================
+;
+1 note alert
+LisaFuji Browser could not find the message that belongs here.
+If you cannot proceed, mention the number ^N.
+
+2 stop alert
+LisaFuji Browser is having trouble reaching the disk that holds the
+tool.^L^L
+Put your documents away one at a time, or press the on-off button to
+save them all.
+
+11 note alert
+LisaFuji Browser 0.2 beta   (October 2026)^L^L
+A text web browser for the Lisa.  Pages come from a LisaWeb gateway
+through an RS-232 FujiNet on Serial B: the gateway fetches the page,
+keeps the words and the links, and sends 14 lines at a time.  A picture
+with a description is a link too: follow it to see the picture.^L^L
+Press H for the start page, G for an address, S to search, ? for help.
+Click a link's number, or type it and press RETURN.^L
+Tool 419314.  T. O'Connor (bmwcyclist), 2026.
+
+0
+
+; ==== MENUS ===============================================================
+1
+File/Print
+Set Aside Everything
+Set Aside "LisaFuji Browser"
+-
+Save & Put Away
+
+2
+Go
+Home/H
+Back/B
+Next Page/N
+Previous Page/P
+Reload/R
+-
+Go to an Address .../G
+Search .../S
+Links on this Page/L
+
+3
+Gateway
+Next Gateway/W
+Show the Gateway List
+Set the Access Key ...
+Set Your Town ...
+
+4
+Speed
+Use 9600 baud
+Use 19200 baud
+
+5
+Help
+How to Use/?
+Wiring and Set-up/W
+
+6
+Version
+About LisaFuji Browser
+
+0

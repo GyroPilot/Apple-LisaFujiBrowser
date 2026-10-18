@@ -1,0 +1,266 @@
+unit LfbGlobals;
+
+{ REV A  14-Oct-2026  LisaFuji Browser 0.1: first build.  Shared state  }
+{                      and the Filer handshake, cloned from LFJ-GLOBALS   }
+{                      REV D (LisaFuji 0.4).  NOT yet compiled on a Lisa. }
+
+{ LFB-GLOBALS.TEXT -- LisaFuji Browser (tool 419314).                    }
+{ A text web browser for the Lisa Office System.  The Lisa never fetches }
+{ a web page itself: it asks a GATEWAY (a small Python service, on the   }
+{ Banana now, on a Raspberry Pi later) for a page by address or by link  }
+{ number.  The gateway fetches the page, keeps the words and the links,  }
+{ numbers the links, wraps the text to 76 columns and hands it back 14   }
+{ lines at a time, through the FujiNet on Serial B, in the same shape as }
+{ the FujiNet news service.  All of the serial and FujiBus work is in    }
+{ LFB-FNBUS (unit FnBus, LisaFuji's unit unchanged).  This unit is state }
+{ only.                                                                   }
+
+INTERFACE
+
+uses (*$U UnitStd.obj *)   UnitStd,
+     (*$U UnitHz.obj *)    UnitHz,
+     (*$U Storage.obj *)   Storage,
+     (*$U QuickDraw.obj *) QuickDraw,
+     (*$U Fontmgr.obj *)   FontMgr,
+     (*$U SysCall.obj *)   SysCall,
+     (*$U wm.events.obj *) Events,
+     (*$U wm.folders.obj *) Folders,
+     (*$U wm.menus.obj *)  Menus,
+     (*$U AlertMgr.obj *)  AlertMgr,
+     (*$U WMLstd.obj *)    WMLstd,
+     (*$U WMlCrs.obj *)    WMLCrs,
+     (*$U FilerComm.obj *) FilerComm;
+
+const
+   lfbVersion = 'LisaFuji Browser 0.2 beta';
+
+   winW = 600;                { the window (LisaFuji's size) }
+   winH = 300;
+   maxLines = 18;             { lines drawn: title, site line, blank, 14, keys }
+   lineHt   = 16;
+   textX    = 10;             { where a line starts, in the window }
+   textY    = 6;
+   urlCap   = 120;            { characters typed at the address prompt }
+   qCap     = 60;             { characters typed at the search prompt }
+   idleMax  = 15000;          { ms a fetch waits with nothing arriving }
+
+   { The gateways.  REV A knows two; a GATEWAYS.TEXT file beside the   }
+   { tool comes in a later build.  The Banana one is reached through    }
+   { PCFuji, which fetches it on the PC; the Pi one through the real     }
+   { FujiNet once the Pi is set up (address to be filled in).            }
+   { REV D: the list lives in GATEWAYS.TEXT beside the tool (name|address|key, one  }
+   { per line).  These are the defaults the tool writes there on its first run.      }
+   gwMax    = 6;              { gateways kept }
+   gwFile   = 'GATEWAYS.TEXT';
+   gwBufLen = 3072;           { bytes of the file read or written }
+   gwKeyCap = 24;
+   gwPub    = 'N1:HTTPS://lisa-gw1.tailc2f141.ts.net';   { the home Pi, public, through the FujiNet }
+   gwPubKey = '';             { release: no key built in; Gateway menu, Set the Access Key (REV H) }
+   gwLan    = 'N1:HTTP://192.168.50.130:8080';           { the Banana, through the FujiNet }
+   gwBanana = 'N1:HTTP://127.0.0.1:8080';                { the Banana, through PCFuji }
+   gwPs     = '&ps=76x14';    { page size asked for }
+
+   pgRows   = 14;             { text lines on a page }
+   pgMax    = 20;             { lines kept from one reply }
+   pgWide   = 160;            { characters kept from one reply line }
+   histMax  = 20;             { pages remembered for B }
+   lnkMax   = 999;            { highest link number accepted }
+
+   { REV K: pictures.  The gateway sends a picture at most picMaxW x picMaxH  }
+   { Lisa pixels, one text line per row; each row is drawn with CopyBits from }
+   { a padded one-row buffer with an EVEN stride (AtkinsonPoint's lessons),   }
+   { and written to picFile so an update event can draw it again.             }
+   picMaxW  = 576;
+   picMaxH  = 240;
+   picTop   = 38;             { window row of the picture's first row (below 2 lines) }
+   picRb    = 80;             { bytes in the row buffer: even, at least picMaxW / 8 }
+   picFile  = 'LFBPICT.DATA';
+   picBatN  = 16;             { rows written or read in one call: one write per row was 3 s a row }
+   picBatSz = 1152;           { picBatN * picMaxW / 8 }
+
+   { Menus.  A '-' separator COUNTS as an item position.                 }
+   mFile = 1;                 { "File/Print" }
+      miAsideAll = 1;
+      miAside    = 2;
+      { 3 is a separator }
+      miPutAway  = 4;
+
+   mGo = 2;                   { "Go" }
+      miHome   = 1;           { Home/H }
+      miBack   = 2;           { Back/B }
+      miNext   = 3;           { Next Page/N }
+      miPrev   = 4;           { Previous Page/P }
+      miReload = 5;           { Reload/R }
+      { 6 is a separator }
+      miAddr   = 7;           { Go to an Address .../G }
+      miSearch = 8;           { Search .../S }
+      miLinks  = 9;           { Links on this Page/L }
+
+   mGate = 3;                 { "Gateway" }
+      miGwNext   = 1;         { the next gateway in the list (REV D) }
+      miGwList   = 2;         { show the list }
+      miGwKey    = 3;         { set the access key for the gateway in use (REV H) }
+      miGwTown   = 4;         { set your town: weather and space station (REV I) }
+
+   mSpeed = 4;                { "Speed" }
+      mi9600  = 1;
+      mi19200 = 2;
+
+   mHelp = 5;                 { "Help" }
+      miHelpUse  = 1;         { How to Use/? }
+      miHelpWire = 2;         { Wiring and Set-up/W }
+
+   mVer = 6;                  { "Version" }
+      miAbout = 1;
+
+   lastBarMenu = 6;
+   lastMenu    = 6;
+
+   alertVerNum = 1;
+   alrtAbou   = 11;           { the About box }
+
+   { Heap: only the alert cache lives here.  4,000 integers = 8,000 bytes. }
+   maxHeap = 4000;
+
+type
+   StatStr = string[80];
+   UrlStr  = string[120];
+   PageStr = string[160];     { one line of a gateway reply }
+   HistRec = record
+                doc  : longint;
+                page : integer
+             end;
+   GwByte  = -128..127;
+   GwRec   = record
+                name : StatStr;
+                url  : StatStr;
+                key  : string[24]
+             end;
+   PicRowArr = array [0..picRb] of -128..127;
+   PicRowBuf = record                { the pads give QuickDraw slack on both sides }
+                  padLo : longint;
+                  a     : PicRowArr;
+                  padHi : longint
+               end;
+   PicCast   = record                { Lisa Pascal has no casts: one address, two types }
+                  case integer of
+                     1 : (ln : longint);
+                     2 : (qp : QDPtr)
+               end;
+
+var
+   theEvent  : EventRecord;
+   myWindow  : WindowPtr;
+   toldToDie : boolean;
+   initing   : boolean;
+   myMenus   : array [1..lastMenu] of MenuInfo;
+   allAlerts : TAlertFile;
+   myZone    : array [0..maxHeap] of integer;
+
+   { the pane: a short list of lines }
+   statLine  : array [1..maxLines] of StatStr;
+   statCnt   : integer;
+   quiet     : boolean;       { TRUE while a page is being built; AddLine }
+                              { then skips the repaint }
+
+   myVol     : E_Name;        { the device this tool lives on, e.g. -#12- }
+
+   { the typed prompt on the last pane line }
+   promptOn  : boolean;
+   promptTxt : UrlStr;        { characters typed so far }
+   promptLbl : StatStr;       { the label drawn before them }
+   promptKnd : integer;       { 1 = an address, 2 = search words, 3 = a link number }
+
+   curBaud   : longint;       { line speed; 9600 at launch }
+   cancelled : boolean;       { a key or click stopped the fetch }
+   gwSel     : integer;       { which gateway, 1 to gwN }
+   gwList    : array [1..gwMax] of GwRec;
+   gwN       : integer;       { gateways in the list }
+   gwBuf     : array [0..gwBufLen - 1] of GwByte;   { GATEWAYS.TEXT, raw }
+   gwBufN    : integer;       { bytes in gwBuf }
+   gwTown    : UrlStr;        { your town, sent as t= so any gateway shows your weather (REV I) }
+
+   { the last reply, by line }
+   pgLine    : array [1..pgMax] of PageStr;
+   pgCnt     : integer;
+   svcEmpty  : boolean;       { the reply had no lines at all }
+
+   { the page shown.  pgMode: 0 = the start screen, 1 = a page, 2 = the }
+   { links list of a page, 3 = a fetch failed.                           }
+   pgMode    : integer;       { REV K: 4 = a picture is shown, 5 = a picture is arriving }
+   picOn     : boolean;       { a picture reply is arriving }
+   picGot    : boolean;       { the last reply was a picture }
+   picShown  : boolean;       { the window holds a whole picture: DrawShow redraws it }
+   picW      : integer;       { its width (a multiple of 8) and height, Lisa pixels }
+   picH      : integer;
+   picX      : integer;       { where it is drawn, from the left }
+   picRows   : integer;       { rows received }
+   picFOk    : boolean;       { LFBPICT.DATA is open and being written }
+   picRef    : integer;
+   picBuf    : PicRowBuf;
+   picBits   : BitMap;
+   picCst    : PicCast;
+   picBat    : array [0..picBatSz] of -128..127;   { rows on their way to or from LFBPICT.DATA }
+   picBatC   : integer;       { rows in picBat }
+   pgDoc     : longint;       { document number from the gateway }
+   pgPage    : integer;       { page shown, and how many there are }
+   pgPgs     : integer;
+   pgTitle   : StatStr;
+   pgSite    : StatStr;       { the site line: host and link count }
+   pgLinks   : integer;       { links in the document }
+   pgFirst   : integer;       { pane line of the first text line (4) }
+   pgLast    : integer;       { pane line of the last text line drawn }
+
+   { the history for B: the pages seen, newest last }
+   hist      : array [1..histMax] of HistRec;
+   histCnt   : integer;
+
+   { the last request, for R and for the failure page.  rqKind: 1 = an  }
+   { address (rqTxt), 2 = a page (rqDoc, rqN), 3 = a link (rqDoc, rqN), }
+   { 4 = a search (rqTxt), 5 = home, 6 = the links list (rqDoc, rqN).    }
+   rqKind    : integer;
+   rqTxt     : UrlStr;
+   rqDoc     : longint;
+   rqN       : integer;
+
+procedure HandleFilerOp (var wantsOpen : boolean);
+
+
+IMPLEMENTATION
+
+procedure HandleFilerOp {var wantsOpen : boolean};
+var fx  : FilerExt;
+    err : integer;
+begin
+   wantsOpen := false;
+   GetAddParms(err, theEvent, fx);
+
+   case fx.theFlrOp of
+
+      fcNone :
+         wantsOpen := true;              { the user opened the tool }
+
+      fcResume :
+         TellFiler(err, docClosd, internalError, theEvent.who);
+
+      fcClose, fcSuspend, fcShred :
+         begin
+            myWindow := nil;
+            TellFiler(err, docClosd, allOK, theEvent.who)
+         end;
+
+      fcCopy, fcPut :
+         TellFiler(err, docNotXfered, internalError, theEvent.who);
+
+      fcDfClose :
+         TellFiler(err, dfClosed, allOK, theEvent.who);
+
+      fcTerminate :
+         toldToDie := true;
+
+      otherwise
+
+   end
+end;
+
+end.

@@ -1,0 +1,19 @@
+$EXEC
+${==========================================================================}
+${ LFB-COMP.TEXT -- compile LisaFuji: GLOBALS, then FNBUS, then MAIN.      }
+${==========================================================================}
+F{ilemgr}D{elete}LFB/FNBUS.OBJ  Y{es}
+        D{elete}LFB/GLOBALS.OBJ  Y{es}
+        D{elete}LFB/MAIN.OBJ  Y{es}
+        Q{uit}
+${                                                                          }
+P{ascal Compile}LFB/GLOBALS.TEXT
+{no listing file - this comment-only line is the [RETURN] answer}
+LFB/GLOBALS.OBJ
+P{ascal Compile}LFB/FNBUS.TEXT
+{no listing file}
+LFB/FNBUS.OBJ
+P{ascal Compile}LFB/MAIN.TEXT
+{no listing file}
+LFB/MAIN.OBJ
+$ENDEXEC
