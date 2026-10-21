@@ -1,6 +1,7 @@
-LisaFuji Browser 0.2 beta (REV K) -- what is here and how to build it
+LisaFuji Browser 1.0 beta (REV N) -- what is here and how to build it
 
 sources/LFB-*.TEXT    the Lisa Pascal program, its units (LFB-FNBUS: LisaFuji's FujiBus unit) and the Workshop execs
                       (LFB-MAKE builds, LFB-INSTALL registers tool 419314)
 icon/LFBICONA.BIN     the tool icon (copy to the Lisa as LFB/ICON.BIN)
-gateway/gateway.py    the LisaWeb gateway: pages as numbered text for the Lisa, pictures dithered (REV D)
+gateway/gateway.py    the LisaWeb gateway: pages as numbered text for the Lisa, pictures dithered, self-registering keys (REV E1)
+gateway/gw_ids.py     lists, bans and unbans the Browser copies' self-made keys

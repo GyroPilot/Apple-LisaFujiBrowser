@@ -32,7 +32,7 @@ uses (*$U UnitStd.obj *)   UnitStd,
      (*$U FilerComm.obj *) FilerComm;
 
 const
-   lfbVersion = 'LisaFuji Browser 0.2 beta';
+   lfbVersion = 'LisaFuji Browser 1.0 beta';   { REV N: 1.0 beta (Tim, 20-Oct) }
 
    winW = 600;                { the window (LisaFuji's size) }
    winH = 300;
@@ -179,6 +179,7 @@ var
    gwBuf     : array [0..gwBufLen - 1] of GwByte;   { GATEWAYS.TEXT, raw }
    gwBufN    : integer;       { bytes in gwBuf }
    gwTown    : UrlStr;        { your town, sent as t= so any gateway shows your weather (REV I) }
+   idleN     : longint;       { REV M: idle loops so far (randomness for MakeKey) }
 
    { the last reply, by line }
    pgLine    : array [1..pgMax] of PageStr;

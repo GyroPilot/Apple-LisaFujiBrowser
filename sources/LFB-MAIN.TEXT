@@ -1233,6 +1233,37 @@ begin
    hist[histCnt].page := pgPage
 end;
 
+procedure MakeKey;
+{ REV M.  This copy's own key for the public gateway: 'u' + 11 of      }
+{ a-z and 2-9.  The gateway registers it on first use; Tim can switch  }
+{ it off.  Kept in GATEWAYS.TEXT (GwSave).                             }
+var s1, s2, s3, secs : longint;
+    i, r             : integer;
+    ok               : boolean;
+    abc              : string[34];
+    k                : string[12];
+    one              : string[1];
+begin
+   abc := 'abcdefghijkmnpqrstuvwxyz23456789';
+   secs := FnSecs(ok);
+   if secs < 0 then secs := -secs;
+   s1 := (secs mod 30268) + 1;
+   s2 := (idleN mod 30306) + 1;
+   s3 := ((secs div 7 + (idleN mod 100000) * 13) mod 30322) + 1;
+   k := 'u';
+   one := ' ';
+   for i := 1 to 11 do begin
+      s1 := (171 * s1) mod 30269;
+      s2 := (172 * s2) mod 30307;
+      s3 := (170 * s3) mod 30323;
+      r := (s1 + s2 + s3) mod length(abc);
+      one[1] := abc[r + 1];
+      k := concat(k, one)
+   end;
+   gwList[gwSel].key := k;
+   GwSave
+end;
+
 procedure GwFetch (var req : Str255; isList : boolean);
 { Send request req (the part after the gateway's address), then show   }
 { the page that comes back, or why none did.                            }
@@ -1245,6 +1276,9 @@ begin
    Head(row);
    GwBase(url);
    url := concat(url, req);
+   if gwList[gwSel].key = '' then          { REV M: no key for the public Pi: make this copy's own }
+      if gwList[gwSel].url = gwPub then
+         MakeKey;
    if gwList[gwSel].key <> '' then begin
       { REV E: the key is a query parameter: ? when the request has none yet, & after one }
       if pos('?', req) = 0 then
@@ -2049,6 +2083,7 @@ begin
    else
       myVol := '-#12-';                { defensive fallback: boot }
    GwDefaults;
+   idleN := 0;                         { REV M }
    GwLoad;                             { REV D: GATEWAYS.TEXT, written if missing }
 
    InitMP(theHeap, myPrefix, @AlertFailed, alertVerNum,
@@ -2091,8 +2126,11 @@ begin { main program }
             GetEvent(theEvent);
             ProcessTheEvent
          end
-         else
+         else begin
+            idleN := idleN + 1;                 { REV M }
+            if idleN > 1000000000 then idleN := 0;
             LetOthersRun
+         end
       end;
 
    until toldToDie;

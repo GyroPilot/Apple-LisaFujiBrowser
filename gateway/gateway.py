@@ -18,6 +18,10 @@ Every reply is plain ASCII, lines ending in LF:
   then up to <rows> lines of text, at most <cols> wide; links marked [n]
 A problem is one line starting "ERROR:".
 
+GATEWAY REV E1 (20-Oct-2026 23:50): a picture that is not shown and has no alt text of its own gets no line
+  (the Wikipedia infobox logo borrowed the photo's caption: a second, unnumbered [picture: ...] line).
+GATEWAY REV E (20-Oct-2026): self-registering keys for Browser 0.2.1 (ids.txt, ids_banned.txt, gw_ids.py); see
+  patch_gw_reve.py.
 GATEWAY REV D (pictures) (17-Oct-2026): described pictures as links for Browser 0.2 (pv=1), dithered and sent row by row; see patch_gw_pics.py.
 GATEWAY REV C (15-Oct-2026): access keys, a rate limit, pages cached on disk, a request log.
   keys.txt beside this file: one "key  name" per line; blank lines and # comments ignored; reloaded when it changes.
@@ -46,9 +50,12 @@ KEY_FILE = os.path.join(HERE, "keys.txt")
 DOC_FILE = os.path.join(HERE, "docs.json")
 LOG_FILE = os.path.join(HERE, "requests.log")
 RATE_MINUTE, RATE_DAY = 60, 3000
+IDS_FILE = os.path.join(HERE, "ids.txt")              # REV E: self-made keys, "key  first-seen-UTC  ip-hash"
+BANNED_FILE = os.path.join(HERE, "ids_banned.txt")   # REV E: self-made keys Tim switched off
+NEW_PER_HOUR, NEW_PER_DAY = 3, 40                     # REV E: new self-made keys per address an hour; overall a day
 
 HOME_LINKS = [
-    ("The weather in Columbus (wttr.in)", "lisaweb:weather"),
+    ("The weather in your town (wttr.in)", "lisaweb:weather"),
     ("Where is the International Space Station right now", "lisaweb:iss"),
     ("Wikipedia: Apple Lisa", "https://en.wikipedia.org/wiki/Apple_Lisa"),
     ("LisaList2 forum", "https://lisalist2.com/"),
@@ -123,6 +130,40 @@ def load_keys():
                 places[parts[0]] = where.strip() or DEFAULT_PLACE
 
 
+# ---- REV E: self-made keys ------------------------------------------------------------------------
+import re, hashlib
+SELF_KEY = re.compile(r"^u[a-z2-9]{11}$")
+ids_lock = threading.Lock()
+new_times = []          # (time, ip-hash) of registrations, for the limits
+
+
+def read_set(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return {l.split()[0] for l in f if l.split("#", 1)[0].strip()}
+    except OSError:
+        return set()
+
+
+def self_key(key, client_ip):
+    """A self-made key: let it in, register it, or raise Refused."""
+    if key in read_set(BANNED_FILE):
+        raise Refused("this copy has been switched off by the gateway's owner")
+    with ids_lock:
+        if key in read_set(IDS_FILE):
+            return
+        now = time.time()
+        iph = hashlib.sha256(("lisaweb:" + client_ip).encode()).hexdigest()[:10]
+        new_times[:] = [t for t in new_times if now - t[0] < 86400]
+        if sum(1 for t in new_times if t[1] == iph and now - t[0] < 3600) >= NEW_PER_HOUR:
+            raise Refused("too many new copies from here this hour; try again later")
+        if len(new_times) >= NEW_PER_DAY:
+            raise Refused("too many new copies today; try again tomorrow")
+        new_times.append((now, iph))
+        with open(IDS_FILE, "a", encoding="utf-8") as f:
+            f.write("%s  %s  %s\n" % (key, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)), iph))
+
+
 def is_private(ip):
     try:
         a = ipaddress.ip_address(ip)
@@ -147,11 +188,16 @@ def identify(handler, qs):
             town = " ".join(w[:1].upper() + w[1:] for w in town.split(" "))
         current.place = town[:60]
     if key:
-        if key not in keys:
+        if key in keys:
+            who = "key:" + keys[key]
+        elif SELF_KEY.match(key):                  # REV E: a copy's own key
+            client = (forwarded or ip).split(",")[0].strip()
+            self_key(key, client)
+            who = "id:" + key
+        else:
             raise Refused("that access key is not known to this gateway")
-        who = "key:" + keys[key]
     elif forwarded or not is_private(ip):
-        raise Refused("this gateway needs an access key: Gateway menu, Set the Access Key (ask bmwcyclist)")
+        raise Refused("needs an access key: Gateway menu (ask bmwcyclist)")
     else:
         who = "lan:" + ip
     now = time.time()
@@ -405,7 +451,7 @@ def html_to_blocks(html, base):
                 cur.append(" ")
                 continue
             if name == "img":
-                label = re.sub(r"\s+", " ", pic_name(ch))[:60]
+                label = re.sub(r"\s+", " ", pic_name(ch))[:56]   # REV E1: 56 so "[picture: ...] [nn]" fits a 76-column line
                 if label:
                     src = pic_src(ch, base)
                     if getattr(current, "pics", False) and pic_useful(ch, src):
@@ -414,9 +460,9 @@ def html_to_blocks(html, base):
                             links.append(key + "\t" + label)
                             seen[key] = len(links)
                         cur.append(" [picture: %s] [%d] " % (label, seen[key]))
-                    else:
-                        cur.append(" [picture: %s] " % label)
-                continue
+                    elif (ch.get("alt") or "").strip() or not getattr(current, "pics", False):
+                        cur.append(" [picture: %s] " % label)   # REV E1: a logo or icon that only borrowed a
+                continue                                        # caption gets no line (the infobox logo did)
             if name == "a" and ch.get("href"):
                 href = urllib.parse.urljoin(base, ch["href"])
                 label = ch.get_text(" ", strip=True)
