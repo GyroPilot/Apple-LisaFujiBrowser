@@ -44,11 +44,12 @@ Put your documents away one at a time, or press the on-off button to
 save them all.
 
 11 note alert
-LisaFuji Browser 1.0 beta   (21 October 2026)^L^L
+LisaFuji Browser 1.1 beta   (October 2026)^L^L
 A text web browser for the Lisa.  Pages come from a LisaWeb gateway
 through an RS-232 FujiNet on Serial B: the gateway fetches the page,
 keeps the words and the links, and sends 14 lines at a time.  A picture
-with a description is a link too: follow it to see the picture.^L^L
+with a description is a link too: a small icon of it appears on the
+page after the text; click the icon, or follow the link, for the big one.^L^L
 Press H for the start page, G for an address, S to search, ? for help.
 Click a link's number, or type it and press RETURN.^L
 Tool 419314.  T. O'Connor (bmwcyclist), 2026.
@@ -81,6 +82,7 @@ Next Gateway/W
 Show the Gateway List
 Set the Access Key ...
 Set Your Town ...
+Picture Icons on Pages
 
 4
 Speed

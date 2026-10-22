@@ -16,7 +16,11 @@ Python (`gateway/gateway.py`).
   Lisa draws it row by row (`releases/LISAFUJI_BROWSER_0_2_BETA.dc42`).
 - **1.0 beta (REV N) -- 21 October 2026.** Each copy makes its own access key the first time it talks to the public
   gateway, so there is nothing to ask for or type; the gateway registers it, and a copy that misbehaves can be switched
-  off. Release floppy `releases/LISAFUJI_BROWSER_1_0.dc42`; the sources here are 1.0 beta (REV N).
+  off. Release floppy `releases/LISAFUJI_BROWSER_1_0.dc42`.
+- **1.1 beta (REV O) -- 22 October 2026.** Picture icons on the page: a small 96 x 48 icon of each described
+  picture appears under its link a moment after the text, so you can see what a picture is before you ask for it;
+  click the icon (or follow the link) for the big one. Gateway menu: *Picture Icons on Pages* turns them off and on.
+  Tested on a Lisa 2/10. Release floppy `releases/LISAFUJI_BROWSER_1_1.dc42`; the sources here are 1.1 beta (REV O).
 
 ## Using it
 
@@ -28,7 +32,8 @@ The public gateway (Tim's Raspberry Pi) is open to the Browser: on the first req
 and eleven letters and digits, kept in GATEWAYS.TEXT on its floppy) and the gateway registers it. Limits: 3 new
 copies an hour from one address and 40 a day; 60 requests a minute and 3000 a day for a copy. The Gateway menu can
 still set a named key or choose another gateway. Or run your own: `gateway/gateway.py` (Python 3, the `requests`,
-`beautifulsoup4` and `Pillow` packages); `gateway/gw_ids.py` lists, bans and unbans the self-made keys.
+`beautifulsoup4` and `Pillow` packages); `gateway/gw_ids.py` lists, bans and unbans the self-made keys. The gateway here
+is REV F: it serves the icons (`/w/thumb`) and marks the icon slots in a page when a Browser asks for them (`tv=1`).
 
 ## Credits
 

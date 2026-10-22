@@ -32,7 +32,7 @@ uses (*$U UnitStd.obj *)   UnitStd,
      (*$U FilerComm.obj *) FilerComm;
 
 const
-   lfbVersion = 'LisaFuji Browser 1.0 beta';   { REV N: 1.0 beta (Tim, 20-Oct) }
+   lfbVersion = 'LisaFuji Browser 1.1 beta';   { REV O: picture icons on the page }   { REV N: 1.0 beta (Tim, 20-Oct) }
 
    winW = 600;                { the window (LisaFuji's size) }
    winH = 300;
@@ -77,6 +77,13 @@ const
    picFile  = 'LFBPICT.DATA';
    picBatN  = 16;             { rows written or read in one call: one write per row was 3 s a row }
    picBatSz = 1152;           { picBatN * picMaxW / 8 }
+   { REV O: picture icons on the page.  The gateway puts "~T n 96 48" and two empty   }
+   { lines after a picture link; the icon is fetched after the text and drawn there.  }
+   thW      = 96;             { the icon, Lisa pixels: three 16-pixel text rows }
+   thH      = 48;
+   thNb     = 12;             { bytes in one icon row: thW / 8 }
+   thBytes  = 576;            { thNb * thH }
+   thMax    = 3;              { icons kept for one page }
 
    { Menus.  A '-' separator COUNTS as an item position.                 }
    mFile = 1;                 { "File/Print" }
@@ -101,6 +108,7 @@ const
       miGwList   = 2;         { show the list }
       miGwKey    = 3;         { set the access key for the gateway in use (REV H) }
       miGwTown   = 4;         { set your town: weather and space station (REV I) }
+      miGwIcons  = 5;         { picture icons on pages, on or off (REV O) }
 
    mSpeed = 4;                { "Speed" }
       mi9600  = 1;
@@ -203,6 +211,15 @@ var
    picCst    : PicCast;
    picBat    : array [0..picBatSz] of -128..127;   { rows on their way to or from LFBPICT.DATA }
    picBatC   : integer;       { rows in picBat }
+   thOn      : boolean;       { REV O: icons wanted (Gateway menu); tv=1 goes to the gateway }
+   thMode    : boolean;       { an icon is arriving: PicStart/PicLine draw it in its slot, quietly }
+   thN       : integer;       { slots on the page shown }
+   thCur     : integer;       { the slot being fetched }
+   thTop     : integer;       { window row of the icon being drawn }
+   thRow     : array [1..thMax] of integer;    { pane line of each slot }
+   thLink    : array [1..thMax] of integer;    { its link number: the big picture }
+   thGot     : array [1..thMax] of boolean;    { the icon arrived whole }
+   thData    : array [1..thMax] of array [0..thBytes - 1] of -128..127;   { the icons, for redraws }
    pgDoc     : longint;       { document number from the gateway }
    pgPage    : integer;       { page shown, and how many there are }
    pgPgs     : integer;

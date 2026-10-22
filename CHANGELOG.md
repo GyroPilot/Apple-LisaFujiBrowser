@@ -1,6 +1,12 @@
 # LisaFuji Browser changelog
 
-## 1.0 beta REV N -- 21 Oct 2026 -- RELEASE
+## 1.1 beta REV O -- 22 Oct 2026 -- RELEASE
+- Picture icons on the page: the gateway (REV F) puts a slot after each picture link; after the text is drawn the
+  Browser fetches a 96 x 48 icon for each slot (about a second each at 9600 baud) and draws it there; a click on an
+  icon is the big picture; the icons survive a redraw. Gateway menu item 5, "Picture Icons on Pages", turns them
+  off and on (it takes effect on the next fetch). Tested on a Lisa 2/10 (icon, redraw, click, toggle).
+- Gateway REV F also no longer serves an icon as the big picture (the picture cache ignores icon documents).
+## 1.0 beta REV N -- 21 Oct 2026 -- RELEASE 1.0 beta
 - Version 1.0 beta (About box 21 October 2026); the program is REV M.  Overnight in LisaEm from its floppy against
   the public gateway: the copy's own key made and registered, the start page, the Apple Lisa article.
 - Gateway REV E (20 Oct): self-registering keys (ids.txt, ids_banned.txt, gw_ids.py), limits on new copies; REV E1:

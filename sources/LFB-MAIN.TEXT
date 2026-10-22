@@ -103,14 +103,17 @@ end;
 {------------------------------------------------------------------------}
 
 procedure PicRow (r : integer);
-{ Draw the row in picBuf as picture row r. }
+{ Draw the row in picBuf as picture row r (REV O: of the icon in its slot when thMode). }
 var src, dst : Rect;
+    top      : integer;
 begin
    if myWindow = nil then
       exit(PicRow);
    SetPort(myWindow);
+   top := picTop;
+   if thMode then top := thTop;
    SetRect(src, 0, 0, picW, 1);
-   SetRect(dst, picX, picTop + r, picX + picW, picTop + r + 1);
+   SetRect(dst, picX, top + r, picX + picW, top + r + 1);
    CopyBits(picBits, myWindow^.portBits, src, dst, srcCopy, nil)
 end;
 
@@ -152,6 +155,33 @@ begin
    Sched_Class(se, true)
 end;
 
+procedure ThumbRedraw;
+{ REV O: draw the page's picture icons again from thData (an update event). }
+var i, r, j : integer;
+    sv      : boolean;
+begin
+   if (pgMode <> 1) or (thN = 0) then
+      exit(ThumbRedraw);
+   sv := thMode;
+   thMode := true;
+   picW := thW;
+   picX := textX;
+   picCst.ln := ord4(@picBuf.a);
+   picBits.baseAddr := picCst.qp;
+   picBits.rowBytes := picRb;
+   SetRect(picBits.bounds, 0, 0, thW, 1);
+   for i := 1 to thN do
+      if thGot[i] then begin
+         thTop := textY + (thRow[i] - 1) * lineHt;
+         for r := 0 to thH - 1 do begin
+            for j := 0 to thNb - 1 do
+               picBuf.a[j] := thData[i, r * thNb + j];
+            PicRow(r)
+         end
+      end;
+   thMode := sv
+end;
+
 procedure DrawShow;
 { Repaint the whole status pane. }
 var fi : FontInfo;
@@ -167,7 +197,8 @@ begin
       DrawString(statLine[i])
    end;
    if picShown then
-      PicRedraw                         { REV K: the picture under the title }
+      PicRedraw;                        { REV K: the picture under the title }
+   ThumbRedraw                          { REV O: the page's picture icons }
 end;
 
 procedure DrawOne (i : integer);
@@ -724,6 +755,22 @@ begin
    h := NwNumIn(s, p);
    if (w < 8) or (w > picMaxW) or ((w mod 8) <> 0) or (h < 1) or (h > picMaxH) then
       exit(PicStart);
+   if thMode then begin                            { REV O: an icon, not a page }
+      if (w <> thW) or (h <> thH) then
+         exit(PicStart);
+      picW := w;
+      picH := h;
+      picX := textX;
+      picRows := 0;
+      picCst.ln := ord4(@picBuf.a);
+      picBits.baseAddr := picCst.qp;
+      picBits.rowBytes := picRb;
+      SetRect(picBits.bounds, 0, 0, picW, 1);
+      picOn := true;
+      picGot := true;
+      PicStart := true;
+      exit(PicStart)
+   end;
    pgDoc := d;
    pgPage := 1;
    pgPgs := 1;
@@ -751,6 +798,8 @@ var i   : integer;
     big : Str255;
     row : StatStr;
 begin
+   if thMode then                                  { REV O: an icon leaves the page alone }
+      exit(PicFrame);
    promptOn := false;
    quiet := true;
    LogMode;
@@ -811,6 +860,9 @@ begin
    end;
    if length(s) > 0 then
       PicRow(picRows);
+   if thMode and (picRows < thH) and (thCur >= 1) and (thCur <= thMax) then   { REV O: keep the icon }
+      for n := 0 to thNb - 1 do
+         thData[thCur, picRows * thNb + n] := picBuf.a[n];
    if picFOk then begin
       for n := 0 to nb - 1 do
          picBat[picBatC * nb + n] := picBuf.a[n];
@@ -923,8 +975,10 @@ begin
    uLeft := 0;
    u1 := 0;
    u2 := 0;
-   row := 'Asking the gateway ...  (any key stops it)';
-   AddLine(row);
+   if not thMode then begin                        { REV O: icons come quietly }
+      row := 'Asking the gateway ...  (any key stops it)';
+      AddLine(row)
+   end;
    if not LineUp then
       exit(GwGet);
 
@@ -934,7 +988,7 @@ begin
    k := FnNClos;
    rc := FnNOpen(url, 4, 0);
    if rc <> fnOK then begin
-      SayFail(lead, rc);
+      if not thMode then SayFail(lead, rc);
       k := FnNClos;
       FnPortDn;
       exit(GwGet)
@@ -942,7 +996,7 @@ begin
    if fnStat = 136 then begin                     { opened, but nothing to read }
       svcEmpty := true;
       row := 'Nothing came back from the gateway.';
-      SetLast(row);
+      if not thMode then SetLast(row);
       k := FnNClos;
       FnPortDn;
       exit(GwGet)
@@ -955,7 +1009,7 @@ begin
          big := 'Status 207: no connection to the gateway.'
       else
          big := concat('Refused by the gateway, status ', part);
-      SetBig(big);
+      if not thMode then SetBig(big);
       k := FnNClos;
       FnPortDn;
       exit(GwGet)
@@ -1035,7 +1089,7 @@ begin
             end;
             FnNum(total, part);
             big := concat('Asking the gateway ...  ', concat(part, ' bytes'));
-            if not picOn then
+            if not (picOn or thMode) then
                SetBig(big)                     { a picture uses the whole window }
          end
       end;
@@ -1050,8 +1104,12 @@ begin
    k := FnNClos;
    FnPortDn;
    if picOn then begin
-      PicKeep(false);
+      if not thMode then PicKeep(false);
       picOn := false
+   end;
+   if thMode then begin                            { REV O: an icon: whole or not, say nothing }
+      GwGet := (not cancelled) and (not fail) and (picRows >= thH);
+      exit(GwGet)
    end;
 
    if cancelled then begin
@@ -1181,7 +1239,7 @@ end;
 
 procedure PgDraw;
 { Title, site line with the page count, a blank line, the text, the keys. }
-var i    : integer;
+var i, p : integer;
     last : integer;
     s    : PageStr;
     part : Str255;
@@ -1204,10 +1262,24 @@ begin
    last := pgCnt;
    if last > 3 + pgRows then
       last := 3 + pgRows;
+   thN := 0;
    for i := 4 to last do begin
       s := pgLine[i];
-      NwSub(s, 1, 80, big);
-      AddBig(big)
+      if (length(s) >= 4) and (s[1] = '~') and (s[2] = 'T') and (s[3] = ' ') then begin
+         if thN < thMax then begin                 { REV O: an icon slot: blank now, the icon later }
+            thN := thN + 1;
+            thRow[thN] := statCnt + 1;
+            thGot[thN] := false;
+            p := 4;
+            thLink[thN] := NwNumIn(s, p)
+         end;
+         big := '';
+         AddBig(big)
+      end
+      else begin
+         NwSub(s, 1, 80, big);
+         AddBig(big)
+      end
    end;
    pgLast := statCnt;
    for i := last + 1 to 3 + pgRows do
@@ -1264,16 +1336,10 @@ begin
    GwSave
 end;
 
-procedure GwFetch (var req : Str255; isList : boolean);
-{ Send request req (the part after the gateway's address), then show   }
-{ the page that comes back, or why none did.                            }
-var url : Str255;
-    row : StatStr;
-    enc : Str255;
+procedure GwMakeUrl (var req, url : Str255);
+{ REV O: the whole address for request req: gateway, key, town, pv=1 and tv=1 (from GwFetch). }
+var enc : Str255;
 begin
-   promptOn := false;
-   row := 'Fetching ...';
-   Head(row);
    GwBase(url);
    url := concat(url, req);
    if gwList[gwSel].key = '' then          { REV M: no key for the public Pi: make this copy's own }
@@ -1298,6 +1364,53 @@ begin
       url := concat(url, '?pv=1')
    else
       url := concat(url, '&pv=1');
+   if thOn then                                 { REV O: and icons on the page }
+      url := concat(url, '&tv=1')
+end;
+
+procedure ThumbFetch (i : integer);
+{ REV O: fetch icon i of this page and draw it in its slot. }
+var req, url, part : Str255;
+begin
+   req := '/w/thumb?d=';
+   FnNum(pgDoc, part);
+   req := concat(req, part);
+   FnNum(thLink[i], part);
+   req := concat(req, concat('&n=', part));
+   req := concat(req, '&tw=96&th=48');
+   GwMakeUrl(req, url);
+   thMode := true;
+   thCur := i;
+   thTop := textY + (thRow[i] - 1) * lineHt;
+   thGot[i] := false;
+   if GwGet(url) then
+      thGot[i] := picRows >= thH;
+   thMode := false;
+   picOn := false;
+   picGot := false
+end;
+
+procedure ThumbAll;
+{ REV O: after the text, the icons top to bottom; a key or a click stops the rest. }
+var i : integer;
+begin
+   if (not thOn) or (thN = 0) or (pgMode <> 1) then
+      exit(ThumbAll);
+   for i := 1 to thN do
+      if not UserAborted then
+         ThumbFetch(i)
+end;
+
+procedure GwFetch (var req : Str255; isList : boolean);
+{ Send request req (the part after the gateway's address), then show   }
+{ the page that comes back, or why none did.                            }
+var url : Str255;
+    row : StatStr;
+begin
+   promptOn := false;
+   row := 'Fetching ...';
+   Head(row);
+   GwMakeUrl(req, url);                         { REV O: gateway, key, town, pv=1, tv=1 }
    if not GwGet(url) then begin
       PgFail;
       exit(GwFetch)
@@ -1317,8 +1430,10 @@ begin
    else
       pgMode := 1;
    PgDraw;
-   if not isList then
-      PgPush
+   if not isList then begin
+      PgPush;
+      ThumbAll                                  { REV O: the icons, after the text }
+   end
 end;
 
 procedure GoHome;
@@ -1464,6 +1579,7 @@ procedure PgClick (pt : Point);
 { line is found from the click's height, the "[n]" by measuring the text }
 { before it with the font in use.                                         }
 var ln, p, q, x1, x2 : integer;
+    i   : integer;
     n   : longint;
     s   : PageStr;
     pre : Str255;
@@ -1478,6 +1594,14 @@ begin
    ln := (pt.v - textY) div lineHt + 1;
    if (ln < pgFirst) or (ln > pgLast) then
       exit(PgClick);
+   if pgMode = 1 then                              { REV O: a click on an icon: the big picture }
+      for i := 1 to thN do
+         if thGot[i] then
+            if (ln >= thRow[i]) and (ln < thRow[i] + (thH div lineHt)) then
+               if (pt.h >= textX) and (pt.h <= textX + thW) then begin
+                  FollowN(thLink[i]);
+                  exit(PgClick)
+               end;
    s := statLine[ln];
    hit := false;
    p := 1;
@@ -1909,6 +2033,14 @@ begin
                AskKey
             else if item = miGwTown then
                AskTown
+            else if item = miGwIcons then begin    { REV O }
+               thOn := not thOn;
+               if thOn then
+                  big := 'Picture icons on pages: on.  Click an icon for the big picture.'
+               else
+                  big := 'Picture icons on pages: off.';
+               SetBig(big)
+            end
          end;
 
       mSpeed :
@@ -2084,6 +2216,11 @@ begin
       myVol := '-#12-';                { defensive fallback: boot }
    GwDefaults;
    idleN := 0;                         { REV M }
+   thOn := true;                       { REV O: icons on, until the Gateway menu says otherwise }
+   thMode := false;
+   thN := 0;
+   thCur := 0;
+   thTop := 0;
    GwLoad;                             { REV D: GATEWAYS.TEXT, written if missing }
 
    InitMP(theHeap, myPrefix, @AlertFailed, alertVerNum,

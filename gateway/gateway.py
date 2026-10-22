@@ -18,6 +18,8 @@ Every reply is plain ASCII, lines ending in LF:
   then up to <rows> lines of text, at most <cols> wide; links marked [n]
 A problem is one line starting "ERROR:".
 
+GATEWAY REV F (22-Oct-2026): picture icons on the page for Browser 1.1: tv=1 adds "~T n 96 48" slot lines after
+  picture links; /w/thumb?d=&n=&tw=&th= sends the icon like /w/pic.  See patch_gw_revf.py.
 GATEWAY REV E1 (20-Oct-2026 23:50): a picture that is not shown and has no alt text of its own gets no line
   (the Wikipedia infobox logo borrowed the photo's caption: a second, unnumbered [picture: ...] line).
 GATEWAY REV E (20-Oct-2026): self-registering keys for Browser 0.2.1 (ids.txt, ids_banned.txt, gw_ids.py); see
@@ -182,6 +184,7 @@ def identify(handler, qs):
     # A town sent by the Lisa itself (&t=Paris, France) wins over the key's: this works on any
     # gateway, keyed or not (planned for Browser 0.2 / LisaFuji 0.6).
     current.pics = qs.get("pv", [""])[0] == "1"     # REV D (pictures): a Browser that can show them
+    current.thumbs = current.pics and qs.get("tv", [""])[0] == "1"   # REV F: and icons on the page
     town = qs.get("t", [""])[0].strip()
     if town:
         if town == town.lower():                  # typed all in lower case: Cincinnati, Ohio
@@ -377,7 +380,7 @@ def pic_doc(link, cols, rows):
     now = time.time()
     with docs_lock:
         for did, d in sorted(docs.items(), reverse=True):
-            if d.get("kind") == "pic" and d.get("url") == url and now - d["made"] < 900:
+            if d.get("kind") == "pic" and d.get("url") == url and not d.get("thumb") and now - d["made"] < 900:
                 return did
     check_address(url)
     r = requests.get(url, headers={"User-Agent": UA, "Accept": "image/*"}, timeout=TIMEOUT, stream=True)
@@ -659,9 +662,76 @@ def make_doc(url, cols, rows):
     now = time.time()
     with docs_lock:
         for did, d in sorted(docs.items(), reverse=True):
-            if d.get("url") in (url, url.rstrip("/")) and d["cols"] == cols and d["rows"] == rows and d.get("pics", False) == getattr(current, "pics", False)                     and now - d["made"] < 900:
+            if d.get("url") in (url, url.rstrip("/")) and d["cols"] == cols and d["rows"] == rows and d.get("pics", False) == getattr(current, "pics", False) and d.get("thumbs", False) == getattr(current, "thumbs", False) and now - d["made"] < 900:
                 return did
     return fetch_doc(url, cols, rows)
+
+
+THUMB_W, THUMB_H = 96, 48        # REV F: the icon, Lisa pixels (three 16-pixel text rows high)
+SLOT_RE = re.compile(r"\[picture: [^\]]*\] \[(\d+)\]")
+
+
+def add_thumb_slots(lines, rows):
+    """REV F: after each line with a picture link put "~T n 96 48" and empty lines for the icon's other rows,
+    and keep the block on one page (pad with empty lines when fewer rows are left than the block needs)."""
+    extra = (THUMB_H + 15) // 16 - 1            # empty lines after the slot line
+    block = 2 + extra                             # the text line, the slot line, the extra lines
+    out = []
+    for line in lines:
+        m = SLOT_RE.search(line)
+        if not m:
+            out.append(line)
+            continue
+        while len(out) % rows > rows - block:
+            out.append("")
+        out.append(line)
+        out.append("~T %s %d %d" % (m.group(1), THUMB_W, THUMB_H))
+        out.extend([""] * extra)
+    return out
+
+
+def thumb_doc(link, tw, th, cols, rows):
+    """REV F: the icon of a picture link, as a pic document tw x th (white field, top left)."""
+    url = link[4:].partition("\t")[0]
+    now = time.time()
+    with docs_lock:
+        for did, d in sorted(docs.items(), reverse=True):
+            if d.get("kind") == "pic" and d.get("url") == url and d.get("w") == tw and d.get("h") == th \
+                    and d.get("thumb") and now - d["made"] < 900:
+                return did
+    big = pic_doc(link, cols, rows)                       # fetched and cached at full size once
+    d = docs[big]
+    im = Image.new("L", (d["w"], d["h"]), 255)
+    rowsb = [dec_row(r, d["w"]) for r in d["data"]]
+    for y, rb in enumerate(rowsb):
+        for x in range(d["w"]):
+            if rb[x // 8] & (128 >> (x % 8)):
+                im.putpixel((x, y), 0)
+    sc = min(tw / d["w"], th / d["h"])
+    nw, nh = max(1, int(d["w"] * sc)), max(1, int(d["h"] * sc))
+    small = im.resize((nw, nh), Image.LANCZOS)
+    field = Image.new("L", (tw, th), 255)
+    field.paste(small, (0, 0))
+    data = [enc_row(rw) for rw in atkinson_rows(field)]
+    with docs_lock:
+        next_id[0] += 1
+        did = next_id[0]
+        docs[did] = dict(kind="pic", thumb=True, title=d["title"], host=d["host"], url=url, w=tw, h=th, data=data,
+                         lines=[], links=[], cols=cols, rows=rows, made=time.time())
+        save_docs()
+    return did
+
+
+def dec_row(text, w):
+    """REV F: the inverse of enc_row: 4 characters -> 3 bytes, padded to w/8 bytes."""
+    out = bytearray()
+    for i in range(0, len(text), 4):
+        g = text[i:i + 4].ljust(4, "0")
+        v = 0
+        for ch in g:
+            v = v * 64 + max(0, min(63, ord(ch) - 48))
+        out += bytes(((v >> 16) & 255, (v >> 8) & 255, v & 255))
+    return bytes(out[:w // 8].ljust(w // 8, b"\0"))
 
 
 def fetch_doc(url, cols, rows):
@@ -688,6 +758,8 @@ def fetch_doc(url, cols, rows):
             t = BeautifulSoup(text, "lxml").title
             title = t.get_text(strip=True) if t else host
         lines = layout(blocks, cols)
+        if getattr(current, "thumbs", False):                 # REV F
+            lines = add_thumb_slots(lines, rows)
     return store(ascii_text(title).strip()[:cols], host, final, lines, links, cols, rows)
 
 
@@ -699,7 +771,7 @@ def store(title, host, url, lines, links, cols, rows):
         next_id[0] += 1
         did = next_id[0]
         docs[did] = dict(title=title, host=host, url=url, lines=lines, links=links, cols=cols, rows=rows, made=now,
-                         pics=getattr(current, "pics", False))
+                         pics=getattr(current, "pics", False), thumbs=getattr(current, "thumbs", False))
         save_docs()
     return did
 
@@ -800,6 +872,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     out = render(pic_doc(target, d["cols"], d["rows"]), 1)
                 else:
                     out = render(make_doc(target, d["cols"], d["rows"]), 1)
+            elif u.path == "/w/thumb":                              # REV F: the icon of picture link n
+                d = docs.get(int(qs["d"][0]))
+                if not d:
+                    raise Refused("that page has expired; open it again")
+                n = int(qs["n"][0])
+                if n < 1 or n > len(d["links"]) or not d["links"][n - 1].startswith("pic:"):
+                    raise Refused("there is no picture %d on that page" % n)
+                tw = max(8, min(int(qs.get("tw", [str(THUMB_W)])[0]) // 8 * 8, 576))
+                th = max(1, min(int(qs.get("th", [str(THUMB_H)])[0]), 240))
+                out = render(thumb_doc(d["links"][n - 1], tw, th, d["cols"], d["rows"]), 1)
             elif u.path == "/w/find":
                 out = render(find(qs.get("q", [""])[0], cols, rows), 1)
             elif u.path == "/w/links":

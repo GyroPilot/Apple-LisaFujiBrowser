@@ -1,4 +1,4 @@
-LisaFuji Browser 1.0 beta for the Apple Lisa Office System       October 2026 (release build REV N)
+LisaFuji Browser 1.1 beta for the Apple Lisa Office System       October 2026 (release build REV O)
 A text web browser through an RS-232 FujiNet and the LisaWeb gateway.  Tool 419314.
 
 USE
@@ -9,6 +9,8 @@ USE
     G  go to an address        S  search Wikipedia        ?  help
     On a page: click a link's number, or type it and RETURN.  SPACE next page, P previous,
     B back, R reload, L the links.  A [picture: ...] link draws the picture, line by line.
+    A small icon of each picture appears under its link a moment after the text; click the
+    icon for the big one.  Gateway menu: Picture Icons on Pages turns the icons off and on.
 
   The public gateway is Tim's Raspberry Pi.  This copy makes its own access key the first time
   it asks the gateway for a page, and keeps it in GATEWAYS.TEXT on the floppy: nothing to ask
@@ -20,5 +22,5 @@ SOURCE
   Tim O'Connor (bmwcyclist), with Claude.  Tested on a Lisa 2/10, October 2026.
 
 WHAT'S IN THIS RELEASE
-  LISAFUJI_BROWSER_1_0.dc42             the release floppy
-  LisaFujiBrowser_1.0_beta_source.zip   Lisa Pascal sources, exec files, the icon and the gateway
+  LISAFUJI_BROWSER_1_1.dc42             the release floppy
+  LisaFujiBrowser_1.1_beta_source.zip   Lisa Pascal sources, exec files, the icon and the gateway
