@@ -1,5 +1,9 @@
 # LisaFuji Browser changelog
 
+## 1.1 beta REV R -- 23 Oct 2026 -- the 1.1 beta release floppy (REV Q tested on the 2/10, 23 Oct)
+- The speed page's FNSPEED.DATA note is its own line (REV Q joined it onto a 70-character line: 96 characters into an
+  80-character string, which the Lisa does not range-check, so it drew off the window). The Speed menu probes for the
+  speed first when the port has not been opened yet, so 'Already at' is never a guess.
 ## 1.1 beta REV P / REV Q -- 22-23 Oct 2026 -- update of the 1.1 beta release (staged)
 - REV P: the Gateway menu's Picture Icons item carries a check mark; turning it on fetches the icons for the page
   on the screen at once, turning it off erases them.

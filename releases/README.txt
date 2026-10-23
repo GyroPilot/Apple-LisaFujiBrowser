@@ -1,4 +1,4 @@
-LisaFuji Browser 1.1 beta for the Apple Lisa Office System       October 2026 (release build REV Q)
+LisaFuji Browser 1.1 beta for the Apple Lisa Office System       October 2026 (release build REV R)
 A text web browser through an RS-232 FujiNet and the LisaWeb gateway.  Tool 419314.
 
 New in this build: the speed set from the Lisa.  Speed > Use 19200 baud posts the new speed to the FujiNet's own web page
