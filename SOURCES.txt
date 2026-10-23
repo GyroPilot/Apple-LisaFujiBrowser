@@ -1,4 +1,4 @@
-LisaFuji Browser 1.1 beta (REV O) -- what is here and how to build it
+LisaFuji Browser 1.1 beta (REV Q) -- what is here and how to build it
 
 sources/LFB-*.TEXT    the Lisa Pascal program, its units (LFB-FNBUS: LisaFuji's FujiBus unit) and the Workshop execs
                       (LFB-MAKE builds, LFB-INSTALL registers tool 419314)

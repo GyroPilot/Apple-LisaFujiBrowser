@@ -82,6 +82,7 @@ begin
    ClearMenuBar;
    for m := mFile to lastBarMenu do
       InsertMenu(myMenus[m], 0);
+   CheckItem(myMenus[mGate], miGwIcons, thOn);     { REV P: the icons setting shows in the menu }
    DrawMenuBar
 end;
 
@@ -180,6 +181,22 @@ begin
          end
       end;
    thMode := sv
+end;
+
+procedure ThumbClear;
+{ REV P: the icons are switched off: wipe the ones drawn and forget them. }
+var i : integer;
+    r : Rect;
+begin
+   if myWindow = nil then
+      exit(ThumbClear);
+   SetPort(myWindow);
+   for i := 1 to thN do
+      if thGot[i] then begin
+         SetRect(r, textX, textY + (thRow[i] - 1) * lineHt, textX + thW, textY + (thRow[i] - 1) * lineHt + thH);
+         EraseRect(r);
+         thGot[i] := false
+      end
 end;
 
 procedure DrawShow;
@@ -366,8 +383,15 @@ function LineUp : boolean;
 var part : Str255;
     big  : Str255;
     row  : StatStr;
+    old  : longint;
 begin
    LineUp := true;
+   if not fnFound then begin            { phase 2: which speed answers?  Once per launch. }
+      old := curBaud;
+      if FnFind(curBaud) = fnOK then
+         if curBaud <> old then
+            if FnCfgSv(myVol, curBaud) then ;
+   end;
    if FnPortUp(curBaud) then
       exit(LineUp);
    LineUp := false;
@@ -400,7 +424,7 @@ begin
    AddLine(row);
    row := 'SD card: in the file fnconfig.ini, under [Serial], put baud=9600';
    AddLine(row);
-   row := 'and restart the FujiNet.  The Speed menu here must say the same.';
+   row := 'and restart the FujiNet.  The Speed menu can change both ends later.';
    AddLine(row);
    row := '';
    AddLine(row);
@@ -417,19 +441,85 @@ begin
 end;
 
 procedure SetSpeed (baud : longint);
-var row : StatStr;
+{ Phase 2 (22-Oct), LisaFuji REV S's way: the Speed menu sets the FujiNet }
+{ too.  FnSetBd posts the new speed to the adapter's own web page, presses }
+{ its Reset button, and opens the port again at the new speed.  The       }
+{ choice, with the port, is kept in FNSPEED.DATA beside the tool.          }
+var row   : StatStr;
+    part  : Str255;
+    big   : Str255;
+    rc    : integer;
+    stage : integer;
+    ok    : boolean;
 begin
    promptOn := false;
-   curBaud := baud;
+   FnNum(baud, part);
+   if baud = curBaud then begin
+      big := concat('Already at ', concat(part, ' baud.'));
+      SetBig(big);
+      exit(SetSpeed)
+   end;
    quiet := true;
-   row := 'Speed changed.';
+   row := concat('Changing to ', concat(part, ' baud ...'));
    Head(row);
-   row := 'The FujiNet must be set to the same speed: on its SD card, in';
+   row := 'Telling the FujiNet through its web page, restarting it, then';
    AddLine(row);
-   row := 'fnconfig.ini under [Serial], set baud= to this number, then';
+   row := 'opening the port at the new speed.  About 20 seconds.';
    AddLine(row);
-   row := 'restart the FujiNet.  Press H to test.';
+   quiet := false;
+   DrawShow;
+   rc := FnSetBd(curBaud, baud, stage);
+   if stage >= 4 then
+      curBaud := baud;                  { the FujiNet was told, or is there already }
+   ok := FnCfgSv(myVol, curBaud);
+   quiet := true;
+   if (rc = fnOK) and (stage = 7) then begin
+      row := concat('The FujiNet was already at ', concat(part, ' baud; the Browser follows.'));
+      Head(row);
+      row := 'It did not answer at the old speed, but does at this one.  The Browser'
+   end
+   else if rc = fnOK then begin
+      row := concat('Speed changed: ', concat(part, ' baud at both ends.'));
+      Head(row);
+      row := 'The FujiNet restarted at the new speed and answers.  It keeps the';
+      AddLine(row);
+      row := 'speed on its SD card; the Browser'
+   end
+   else if stage <= 3 then begin
+      row := 'The FujiNet was not changed.';
+      Head(row);
+      if stage = 1 then begin
+         FnNum(fnEcode, part);
+         row := concat('The port would not open (ecode ', concat(part, ').  Press W for the wiring.'))
+      end
+      else if stage = 2 then
+         row := 'It gave no address: is it powered, answering, and on the WiFi?'
+      else
+         row := 'Its web page did not take the new speed.  Is its WiFi up?';
+      AddLine(row);
+      row := 'By hand: on its SD card, in fnconfig.ini under [Serial], set baud=,';
+      AddLine(row);
+      row := 'restart the FujiNet, then choose the speed here again.'
+   end
+   else begin
+      row := concat('The FujiNet is now at ', concat(part, ' baud; the Browser follows.'));
+      Head(row);
+      if stage = 5 then begin
+         FnNum(fnEcode, part);
+         row := concat('The port would not open again (ecode ', concat(part, ').'))
+      end
+      else
+         row := 'It does not answer yet: it may still be restarting.';
+      AddLine(row);
+      row := 'Wait a moment and press H for the start page.'
+   end;
+   if rc = fnOK then
+      row := concat(row, ' keeps it in FNSPEED.DATA.');
    AddLine(row);
+   if not ok then begin
+      row := 'FNSPEED.DATA could not be written: the choice lasts until you quit.';
+      AddLine(row)
+   end;
    quiet := false;
    DrawShow
 end;
@@ -1695,7 +1785,7 @@ begin
    AddLine(row);
    row := 'Pages that have expired there (after an hour) are fetched afresh.';
    AddLine(row);
-   row := 'Speed menu: start at 9600.  It must match the FujiNet''s SD card.';
+   row := 'Speed menu: 9600 or 19200.  It sets the FujiNet too, through its web page.';
    AddLine(row);
    row := 'Pictures show as [picture: a Lisa 2] [7]: follow 7 to see it, B comes back.';
    AddLine(row);
@@ -2033,13 +2123,20 @@ begin
                AskKey
             else if item = miGwTown then
                AskTown
-            else if item = miGwIcons then begin    { REV O }
+            else if item = miGwIcons then begin    { REV O; REV P: mark it, act on the page shown }
                thOn := not thOn;
-               if thOn then
-                  big := 'Picture icons on pages: on.  Click an icon for the big picture.'
-               else
-                  big := 'Picture icons on pages: off.';
-               SetBig(big)
+               CheckItem(myMenus[mGate], miGwIcons, thOn);
+               if thOn then begin
+                  big := 'Picture icons on pages: on.  Click an icon for the big picture.';
+                  SetBig(big);
+                  if (pgMode = 1) and (thN > 0) then
+                     ThumbAll
+               end
+               else begin
+                  ThumbClear;
+                  big := 'Picture icons on pages: off.  (R fetches the page without them.)';
+                  SetBig(big)
+               end
             end
          end;
 
@@ -2215,6 +2312,7 @@ begin
    else
       myVol := '-#12-';                { defensive fallback: boot }
    GwDefaults;
+   if FnCfgLd(myVol, curBaud) then ;   { phase 2: the speed and port last used, if FNSPEED.DATA is there }
    idleN := 0;                         { REV M }
    thOn := true;                       { REV O: icons on, until the Gateway menu says otherwise }
    thMode := false;

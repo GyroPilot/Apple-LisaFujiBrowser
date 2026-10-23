@@ -1,5 +1,10 @@
 # LisaFuji Browser changelog
 
+## 1.1 beta REV P / REV Q -- 22-23 Oct 2026 -- update of the 1.1 beta release (staged)
+- REV P: the Gateway menu's Picture Icons item carries a check mark; turning it on fetches the icons for the page
+  on the screen at once, turning it off erases them.
+- REV Q: the Speed menu sets the FujiNet too (LisaFuji REV S's way: web page over N:, reset, port again), FNSPEED.DATA
+  beside the tool keeps speed and port, and the first port open of each launch probes for the speed (FnFind).
 ## 1.1 beta REV O -- 22 Oct 2026 -- RELEASE
 - Picture icons on the page: the gateway (REV F) puts a slot after each picture link; after the text is drawn the
   Browser fetches a 96 x 48 icon for each slot (about a second each at 9600 baud) and draws it there; a click on an
