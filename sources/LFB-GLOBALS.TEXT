@@ -32,7 +32,7 @@ uses (*$U UnitStd.obj *)   UnitStd,
      (*$U FilerComm.obj *) FilerComm;
 
 const
-   lfbVersion = 'LisaFuji Browser 1.1 beta';   { REV O: picture icons on the page }   { REV N: 1.0 beta (Tim, 20-Oct) }
+   lfbVersion = 'LisaFuji Browser 1.2 beta';   { REV S: the ESPFuji ESProFile route (FnBus REV Z) }   { REV O: picture icons on the page }   { REV N: 1.0 beta (Tim, 20-Oct) }
 
    winW = 600;                { the window (LisaFuji's size) }
    winH = 300;

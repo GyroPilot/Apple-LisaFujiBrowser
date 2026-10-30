@@ -1,5 +1,9 @@
 # LisaFuji Browser changelog
 
+## 1.2 beta REV S -- 30 Oct 2026 -- RELEASE
+- FnBus at LisaFuji's REV Z level: the ESPFuji ESProFile mailbox as a third back end (FnSetVol + FnMbUp at launch;
+  the header line says "the ESProFile" and no baud rate on that route). Tim, 30 Oct: every app follows a hardware
+  change. Version box: 1.2 beta, 30 October.
 ## 1.1 beta REV R -- 23 Oct 2026 -- the 1.1 beta release floppy (REV Q tested on the 2/10, 23 Oct)
 - The speed page's FNSPEED.DATA note is its own line (REV Q joined it onto a 70-character line: 96 characters into an
   80-character string, which the Lisa does not range-check, so it drew off the window). The Speed menu probes for the

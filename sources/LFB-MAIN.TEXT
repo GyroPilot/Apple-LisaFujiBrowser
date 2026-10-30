@@ -325,9 +325,13 @@ var part : Str255;
     row  : StatStr;
 begin
    LogMode;
-   FnNum(curBaud, part);
-   big := concat(lfbVersion, '     Serial B, ');
-   big := concat(big, concat(part, ' baud'));
+   if fnVia = fnViaMb then             { REV S: through an ESPFuji ESProFile: no port, no baud }
+      big := concat(lfbVersion, '     the ESProFile')
+   else begin
+      FnNum(curBaud, part);
+      big := concat(lfbVersion, '     Serial B, ');
+      big := concat(big, concat(part, ' baud'))
+   end;
    AddBig(big);
    AddLine(ttl);
    row := '';
@@ -2315,6 +2319,8 @@ begin
       myVol := copy(pcInfo.progpathname, 1, cutAt - 1)
    else
       myVol := '-#12-';                { defensive fallback: boot }
+   FnSetVol(myVol);                     { REV S: where MAILBOX.DATA (an ESPFuji drive) is looked for }
+   if FnMbUp then ;                     { REV S: probe it now, so the header is right from the start }
    GwDefaults;
    if FnCfgLd(myVol, curBaud) then ;   { phase 2: the speed and port last used, if FNSPEED.DATA is there }
    idleN := 0;                         { REV M }

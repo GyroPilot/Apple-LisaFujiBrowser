@@ -9,6 +9,11 @@ Python (`gateway/gateway.py`).
 
 ## Status
 
+- **1.2 beta (REV S) -- 30 October 2026.** Through an **ESPFuji** ESProFile as well as an RS-232 FujiNet or a LisaNet: on an ESProFile volume that runs ESPFuji
+(https://github.com/GyroPilot/ESPFuji) the tool finds the mailbox at launch and needs no serial adapter.
+  The header says "the ESProFile" on that route. Same browser as 1.1 beta otherwise. Built and opened in LisaEm; the
+  ESProFile route itself is the FnBus unit proven in LisaFuji 1.2 on the 2/10, not yet run with the Browser on a Lisa.
+  Release floppy `releases/LISAFUJI_BROWSER_1_2_BETA.dc42`.
 - **0.1 beta** -- tested on a Lisa 2/10 with a real FujiNet, 16-17 October 2026: the Apple Inc. article on Wikipedia,
   all 99 pages (`releases/LISAFUJI_BROWSER_0_1.dc42`).
 - **0.2 beta** -- pictures on click: a picture that has a description (alt text, a caption or a title) shows as a
