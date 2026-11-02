@@ -1,6 +1,6 @@
 # LisaFuji Browser
 
-A text web browser for the Apple Lisa Office System. The Lisa asks a small gateway (a Raspberry Pi) for a page through
+A web browser for the Apple Lisa Office System, with pictures and HTTPS sites. The Lisa asks a small gateway (a Raspberry Pi) for a page through
 an RS-232 FujiNet; the gateway simplifies it to numbered text that fits the Lisa's window, 14 lines at a time, and the
 Lisa shows it. Click a link's number (or type it and RETURN) to follow it.
 
@@ -9,6 +9,11 @@ Python (`gateway/gateway.py`).
 
 ## Status
 
+- **1.3 (REV U) -- 1 November 2026. No longer beta.** Tested on a Lisa 2/10 through an ESProFile running ESPFuji:
+  HTTPS sites, pictures on the page and on click, back and forward; the RS-232 FujiNet route is the one 1.0 to 1.2
+  beta were tested on. The ESPFuji mailbox is looked for as "ESPFuji Mailbox" first, then MAILBOX.DATA, so existing
+  setups keep working. Pages come through a LisaWeb gateway (the public one is Tim's Raspberry Pi), so the Browser
+  needs a gateway it can reach. Release floppy `releases/LISAFUJI_BROWSER_1_3.dc42`; the sources here are 1.3.
 - **1.2 beta (REV S) -- 30 October 2026.** Through an **ESPFuji** ESProFile as well as an RS-232 FujiNet or a LisaNet: on an ESProFile volume that runs ESPFuji
 (https://github.com/GyroPilot/ESPFuji) the tool finds the mailbox at launch and needs no serial adapter.
   The header says "the ESProFile" on that route. Same browser as 1.1 beta otherwise. Built and opened in LisaEm; the

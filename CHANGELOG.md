@@ -1,5 +1,11 @@
 # LisaFuji Browser changelog
 
+## 1.3 REV U -- 1 Nov 2026 -- RELEASE (no longer beta)
+- Tim, 1 Nov: tested on the 2/10 through an ESProFile with ESPFuji 1.1b1 (HTTPS, pictures, back/forward); the
+  RS-232 route is the one 1.0 to 1.2 beta were tested on. Version box and header: LisaFuji Browser 1.3.
+- REV T (test, 1 Nov): FnBus looks for "ESPFuji Mailbox" first, then MAILBOX.DATA (old setups keep working), and
+  keeps the ESProFile's WiFi signal for the tools that show it (FnSigTxt).
+
 ## 1.2 beta REV S -- 30 Oct 2026 -- RELEASE
 - FnBus at LisaFuji's REV Z level: the ESPFuji ESProFile mailbox as a third back end (FnSetVol + FnMbUp at launch;
   the header line says "the ESProFile" and no baud rate on that route). Tim, 30 Oct: every app follows a hardware

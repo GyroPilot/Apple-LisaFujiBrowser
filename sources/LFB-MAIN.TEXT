@@ -1741,7 +1741,7 @@ begin
    promptOn := false;
    pgMode := 0;
    quiet := true;
-   row := 'A text web browser.  Pages come from a LisaWeb gateway through the FujiNet.';
+   row := 'A web browser with pictures and HTTPS sites, through a LisaWeb gateway.';
    Head(row);
    row := 'H = the start page: a list of places to go';
    AddLine(row);
