@@ -1,5 +1,9 @@
 # LisaFuji Browser changelog
 
+## 1.3 update 1 (REV V) -- 3 Nov 2026 -- RELEASE (tested on the 2/10, 3 Nov)
+- A failed connection through an ESProFile now shows the ESProFile's own reason ("the drive said: ...") instead of
+  only "status 207".
+- The release floppy's disk name is exact (no trailing spaces).
 ## 1.3 REV U -- 1 Nov 2026 -- RELEASE (no longer beta)
 - Tim, 1 Nov: tested on the 2/10 through an ESProFile with ESPFuji 1.1b1 (HTTPS, pictures, back/forward); the
   RS-232 route is the one 1.0 to 1.2 beta were tested on. Version box and header: LisaFuji Browser 1.3.

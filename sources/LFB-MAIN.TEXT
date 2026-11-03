@@ -1103,6 +1103,8 @@ begin
       FnNum(fnStat, part);
       if fnStat = 170 then
          big := 'Status 170: the gateway was not found.  Is it running?  Is it the right one?'
+      else if (fnStat = 207) and (fnVia = fnViaMb) and (length(fnMbWhy) > 0) then
+         big := concat('The drive said: ', fnMbWhy)   { 2 Nov: the drive's own reason }
       else if fnStat = 207 then
          big := 'Status 207: no connection to the gateway.'
       else

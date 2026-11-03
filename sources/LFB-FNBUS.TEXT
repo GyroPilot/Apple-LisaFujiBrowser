@@ -413,7 +413,7 @@ begin
                      if (FnPlB(0) = 69) and (FnPlB(1) = 82) and (FnPlB(2) = 82) then begin
                         FnMbTxt(tmp);                    { ERROR ... }
                         n := length(tmp);
-                        if n > 80 then n := 80;
+                        if n > 60 then n := 60;    { 2 Nov: 'the drive said: ' + it fits 80 }
                         if n = 0 then fnMbWhy := '' else fnMbWhy := copy(tmp, 1, n);
                         FnMbAsk := fnNakd
                      end;
